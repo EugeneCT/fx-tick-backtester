@@ -1,4 +1,7 @@
+import dataclasses
 from datetime import datetime, timezone
+
+import pytest
 
 from fxtrader.core.types import Bar, Fill, Order, OrderType, Position, Side, Tick
 
@@ -15,11 +18,8 @@ def test_tick_mid_and_spread():
 
 def test_tick_is_immutable():
     tick = Tick(symbol="EURUSD", ts=_ts(), bid=1.1, ask=1.1002)
-    try:
+    with pytest.raises(dataclasses.FrozenInstanceError):
         tick.bid = 2.0  # type: ignore[misc]
-    except (AttributeError, Exception):
-        return
-    raise AssertionError("Tick should be frozen")
 
 
 def test_bar_fields():
