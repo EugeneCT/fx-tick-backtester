@@ -13,6 +13,16 @@ from fxtrader.data.store import TickStore
 app = typer.Typer(add_completion=False, help="fxtrader CLI")
 
 
+@app.callback()
+def _root() -> None:
+    """fxtrader CLI.
+
+    A no-op root callback so Typer keeps subcommands (``download``, and later
+    ``backtest``/``optimize``/``live``) instead of collapsing a single command
+    into the program itself.
+    """
+
+
 def _parse_day(value: str) -> datetime:
     return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
