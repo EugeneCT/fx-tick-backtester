@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 
+from fxtrader.data.backfill import CoverageLedger, backfill as _backfill
 from fxtrader.data.dukascopy import Downloader, _http_download, download_range
 from fxtrader.data.store import TickStore
 
@@ -44,6 +45,27 @@ def run_download(
     return summary
 
 
+def run_backfill(
+    symbols: list[str],
+    start: datetime,
+    end: datetime,
+    data_dir: str | Path,
+    downloader: Downloader = _http_download,
+    workers: int = 8,
+    retries: int = 3,
+    resume: bool = True,
+    progress=lambda msg: None,
+) -> dict[str, int]:
+    """Resilient bulk download into a TickStore, resumable via a coverage ledger."""
+    store = TickStore(data_dir)
+    ledger = CoverageLedger(Path(data_dir) / "coverage.json") if resume else None
+    return _backfill(
+        symbols, start, end, store,
+        downloader=downloader, workers=workers, retries=retries,
+        ledger=ledger, progress=progress,
+    )
+
+
 @app.command()
 def download(
     symbols: str = typer.Option(..., help="Comma-separated, e.g. EURUSD,GBPUSD,USDJPY"),
@@ -60,6 +82,31 @@ def download(
     )
     for sym, count in summary.items():
         typer.echo(f"{sym}: {count} ticks")
+
+
+@app.command()
+def backfill(
+    symbols: str = typer.Option(..., help="Comma-separated, e.g. EURUSD,GBPUSD,USDJPY"),
+    start: str = typer.Option(..., help="Inclusive start date YYYY-MM-DD"),
+    end: str = typer.Option(..., help="Exclusive end date YYYY-MM-DD"),
+    data_dir: str = typer.Option("data", help="Parquet store root"),
+    workers: int = typer.Option(8, help="Concurrent hourly downloads"),
+    retries: int = typer.Option(3, help="Retries per hour on transient errors"),
+    resume: bool = typer.Option(True, help="Skip months already in the coverage ledger"),
+) -> None:
+    """Resilient bulk download of Dukascopy ticks (concurrent, resumable)."""
+    summary = run_backfill(
+        symbols=[s.strip() for s in symbols.split(",") if s.strip()],
+        start=_parse_day(start),
+        end=_parse_day(end),
+        data_dir=data_dir,
+        workers=workers,
+        retries=retries,
+        resume=resume,
+        progress=typer.echo,
+    )
+    for sym, count in summary.items():
+        typer.echo(f"TOTAL {sym}: {count} ticks")
 
 
 def main() -> None:
