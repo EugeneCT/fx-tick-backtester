@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import lzma
 import struct
+import urllib.error
+import urllib.request
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from fxtrader.core.types import Tick
@@ -49,4 +52,46 @@ def decode_bi5(raw: bytes, hour_start: datetime, symbol: str) -> list[Tick]:
                 ask_volume=ask_v,
             )
         )
+    return ticks
+
+
+Downloader = Callable[[str], bytes]
+
+
+def _http_download(url: str, *, timeout: float = 30.0) -> bytes:
+    """Default downloader. Returns empty bytes for a 404 (no data that hour)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "fxtrader/0.1"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return b""
+        raise
+
+
+def fetch_hour(
+    symbol: str,
+    hour: datetime,
+    *,
+    downloader: Downloader = _http_download,
+) -> list[Tick]:
+    """Download and decode a single hour of ticks."""
+    raw = downloader(build_url(symbol, hour))
+    return decode_bi5(raw, hour, symbol)
+
+
+def download_range(
+    symbol: str,
+    start: datetime,
+    end: datetime,
+    *,
+    downloader: Downloader = _http_download,
+) -> list[Tick]:
+    """Download ticks for [start, end) one hour at a time, in time order."""
+    ticks: list[Tick] = []
+    cursor = start.replace(minute=0, second=0, microsecond=0)
+    while cursor < end:
+        ticks.extend(fetch_hour(symbol, cursor, downloader=downloader))
+        cursor += timedelta(hours=1)
     return ticks
