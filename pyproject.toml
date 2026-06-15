@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fxtrader"
+version = "0.1.0"
+description = "Tick-driven FX backtesting and live trading platform"
+requires-python = ">=3.12"
+dependencies = [
+    "polars>=1.0",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+fxtrader = "fxtrader.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fxtrader"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
