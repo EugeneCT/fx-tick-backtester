@@ -1,8 +1,12 @@
 import json
+import lzma
+import struct
+from datetime import datetime, timezone
 
 import pytest
 
-from fxtrader.data.backfill import CoverageLedger, resilient_download
+from fxtrader.data.backfill import CoverageLedger, backfill, resilient_download
+from fxtrader.data.store import TickStore
 
 
 def test_resilient_download_passes_through_on_success():
@@ -70,3 +74,73 @@ def test_coverage_ledger_marks_and_persists(tmp_path):
     assert reloaded.is_done("EURUSD", "2024-02") is False
     on_disk = json.loads(path.read_text())
     assert on_disk == {"EURUSD": ["2024-01"]}
+
+
+def _payload(n=1):
+    rec = b"".join(struct.pack(">IIIff", i, 110020, 110000, 1.0, 1.0) for i in range(n))
+    return lzma.compress(rec, format=lzma.FORMAT_ALONE)
+
+
+def test_backfill_populates_store_and_skips_closed_hours(tmp_path):
+    seen = []
+
+    def fake(url):
+        seen.append(url)
+        return _payload(1)
+
+    store = TickStore(tmp_path)
+    # Fri 2024-01-05 21:00 (open) through Sun 2024-01-07 23:00 -> only Fri21 + Sun22 open
+    summary = backfill(
+        ["EURUSD"],
+        datetime(2024, 1, 5, 21, tzinfo=timezone.utc),
+        datetime(2024, 1, 7, 23, tzinfo=timezone.utc),
+        store,
+        downloader=fake,
+        workers=2,
+    )
+    assert summary["EURUSD"] == 2  # one tick per open hour, 2 open hours
+    # No Saturday URLs were requested
+    assert not any("/2024/00/06/" in u for u in seen)  # Jan is month index 00; day 06 = Saturday
+    df = store.read_ticks("EURUSD",
+                          datetime(2024, 1, 1, tzinfo=timezone.utc),
+                          datetime(2024, 2, 1, tzinfo=timezone.utc))
+    assert df.height == 2
+
+
+def test_backfill_resumes_via_ledger(tmp_path):
+    calls = {"n": 0}
+
+    def counting(url):
+        calls["n"] += 1
+        return _payload(1)
+
+    store = TickStore(tmp_path)
+    from fxtrader.data.backfill import CoverageLedger
+    ledger = CoverageLedger(tmp_path / "coverage.json")
+
+    start = datetime(2024, 1, 2, 9, tzinfo=timezone.utc)
+    end = datetime(2024, 1, 2, 12, tzinfo=timezone.utc)  # Tue, 3 open hours, single month
+
+    backfill(["EURUSD"], start, end, store, downloader=counting, ledger=ledger, workers=2)
+    first = calls["n"]
+    assert first == 3
+    assert ledger.is_done("EURUSD", "2024-01")
+
+    # Re-run: month is complete, so no further downloads
+    backfill(["EURUSD"], start, end, store, downloader=counting, ledger=ledger, workers=2)
+    assert calls["n"] == first  # unchanged
+
+
+def test_backfill_reports_progress(tmp_path):
+    msgs = []
+    store = TickStore(tmp_path)
+    backfill(
+        ["EURUSD"],
+        datetime(2024, 1, 2, 9, tzinfo=timezone.utc),
+        datetime(2024, 1, 2, 11, tzinfo=timezone.utc),
+        store,
+        downloader=lambda url: _payload(1),
+        workers=2,
+        progress=msgs.append,
+    )
+    assert any("EURUSD" in m and "2024-01" in m for m in msgs)
