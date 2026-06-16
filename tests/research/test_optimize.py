@@ -40,9 +40,19 @@ def test_grid_search_skips_none_results():
 
 
 def test_grid_search_minimize():
+    # Minimize a positive "less is better" metric (e.g. turnover): smallest raw value first.
     def run_fn(params, start, end):
-        return {"max_drawdown": -float(params["fast"]) / 100}
+        return {"turnover": float(params["fast"])}
 
-    # maximize=False -> least-negative drawdown first
-    ranked = grid_search({"fast": [5, 20]}, run_fn, S, E, objective="max_drawdown", maximize=False)
+    ranked = grid_search({"fast": [5, 20]}, run_fn, S, E, objective="turnover", maximize=False)
     assert ranked[0]["params"]["fast"] == 5
+    assert ranked[-1]["params"]["fast"] == 20
+
+
+def test_grid_search_least_bad_drawdown_via_maximize():
+    # max_drawdown is <= 0; "least bad" = closest to zero = the MAX value -> maximize=True.
+    def run_fn(params, start, end):
+        return {"max_drawdown": -float(params["fast"]) / 100}  # fast=5 -> -0.05, fast=20 -> -0.20
+
+    ranked = grid_search({"fast": [5, 20]}, run_fn, S, E, objective="max_drawdown", maximize=True)
+    assert ranked[0]["params"]["fast"] == 5  # -0.05 is the least-bad drawdown

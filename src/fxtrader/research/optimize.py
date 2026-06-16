@@ -30,9 +30,8 @@ def grid_search(
         metrics = run_fn(params, start, end)
         if metrics is not None:
             results.append({"params": params, "metrics": metrics})
-    # Rank by the objective's magnitude so the "best" candidate is first in both modes:
-    # maximize -> largest |metric| first; minimize -> smallest |metric| (e.g. least-negative
-    # drawdown) first. The spec's test_grid_search_minimize encodes this least-negative-first
-    # ordering for a negative-valued objective.
-    results.sort(key=lambda r: abs(r["metrics"][objective]), reverse=maximize)
+    # Rank by the raw objective value: maximize -> highest first, minimize -> lowest first.
+    # (For a "less is better" but negative-valued metric like max_drawdown, the least-bad value
+    # is the largest, so you maximize it — sign-aware, no abs() hack.)
+    results.sort(key=lambda r: r["metrics"][objective], reverse=maximize)
     return results
