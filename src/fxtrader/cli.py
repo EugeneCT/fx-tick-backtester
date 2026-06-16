@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,7 +17,8 @@ from fxtrader.data.feed import HistoricalTickFeed
 from fxtrader.data.store import TickStore
 from fxtrader.engine.backtest import BacktestEngine
 from fxtrader.metrics.performance import compute_metrics
-from fxtrader.metrics.report import write_html_report, write_results_json
+from fxtrader.metrics.report import _json_safe, write_html_report, write_results_json
+from fxtrader.research.optimize import walk_forward_optimize
 from fxtrader.risk.manager import RiskLimits, RiskManager
 from fxtrader.strategy.examples.ma_crossover import MaCrossover
 
@@ -117,6 +119,43 @@ def run_backtest_config(config: BacktestConfig, data_dir: str | Path):
     return run_backtest(data_dir=data_dir, **config.to_run_kwargs())
 
 
+def _ma_run_fn(symbol: str, data_dir: str | Path, bar_minutes: int, size: float):
+    """Build a run_fn(params, start, end) -> metrics for the MA grid (None on invalid params)."""
+    def run_fn(params: dict, start: datetime, end: datetime):
+        if params["fast"] >= params["slow"]:
+            return None
+        _result, metrics = run_backtest(
+            symbol=symbol, start=start, end=end, data_dir=data_dir,
+            fast=params["fast"], slow=params["slow"], size=size, bar_minutes=bar_minutes,
+        )
+        return metrics
+
+    return run_fn
+
+
+def run_optimize(
+    symbol: str,
+    start: datetime,
+    end: datetime,
+    data_dir: str | Path,
+    *,
+    fast_values: list[int],
+    slow_values: list[int],
+    n_splits: int = 3,
+    train_ratio: float = 0.7,
+    bar_minutes: int = 5,
+    size: float = 10_000,
+    objective: str = "sharpe",
+) -> dict:
+    """Walk-forward grid optimization of MA fast/slow over stored ticks. Returns strict-JSON-safe dict."""
+    run_fn = _ma_run_fn(symbol, data_dir, bar_minutes, size)
+    out = walk_forward_optimize(
+        run_fn, start, end, {"fast": fast_values, "slow": slow_values},
+        n_splits=n_splits, train_ratio=train_ratio, objective=objective,
+    )
+    return _json_safe(out)
+
+
 @app.command()
 def download(
     symbols: str = typer.Option(..., help="Comma-separated, e.g. EURUSD,GBPUSD,USDJPY"),
@@ -209,6 +248,43 @@ def backtest(
     if html_out:
         write_html_report(html_out, cfg, result, metrics)
         typer.echo(f"wrote {html_out}")
+
+
+def _int_list(value: str) -> list[int]:
+    return [int(x) for x in value.split(",") if x.strip()]
+
+
+@app.command()
+def optimize(
+    symbol: str = typer.Option(..., help="Single symbol, e.g. EURUSD"),
+    start: str = typer.Option(..., help="Inclusive start date YYYY-MM-DD"),
+    end: str = typer.Option(..., help="Exclusive end date YYYY-MM-DD"),
+    data_dir: str = typer.Option("data", help="Parquet store root"),
+    fast: str = typer.Option("5,10,20", help="Comma-separated fast MA windows"),
+    slow: str = typer.Option("30,50,100", help="Comma-separated slow MA windows"),
+    n_splits: int = typer.Option(3, help="Walk-forward folds"),
+    train_ratio: float = typer.Option(0.7, help="Train fraction of each fold"),
+    bar_minutes: int = typer.Option(5, help="Bar interval in minutes"),
+    objective: str = typer.Option("sharpe", help="Metric to maximize on train"),
+    json_out: str = typer.Option(None, "--json", help="Write optimize results to this path"),
+) -> None:
+    """Walk-forward optimize the MA-crossover params over stored ticks."""
+    out = run_optimize(
+        symbol=symbol, start=_parse_day(start), end=_parse_day(end), data_dir=data_dir,
+        fast_values=_int_list(fast), slow_values=_int_list(slow),
+        n_splits=n_splits, train_ratio=train_ratio, bar_minutes=bar_minutes, objective=objective,
+    )
+    typer.echo(f"symbol={symbol}  objective={objective}  folds={len(out['folds'])}")
+    for i, fr in enumerate(out["folds"]):
+        oos = fr["test_metrics"].get(objective) if fr["test_metrics"] else None
+        if oos is not None:
+            typer.echo(f"  fold {i}: best={fr['best_params']}  OOS {objective}={oos:.2f}")
+        else:
+            typer.echo(f"  fold {i}: best={fr['best_params']}  OOS {objective}=n/a")
+    typer.echo(f"  mean OOS {objective}: {out['mean_oos_objective']:.2f}")
+    if json_out:
+        Path(json_out).write_text(json.dumps(out, indent=2, allow_nan=False))
+        typer.echo(f"wrote {json_out}")
 
 
 def main() -> None:
