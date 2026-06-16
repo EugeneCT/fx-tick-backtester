@@ -16,7 +16,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+dev = ["pytest>=8.0", "ruff>=0.6", "ib_async>=2"]
+live = ["ib_async>=2"]
 
 [project.scripts]
 fxtrader = "fxtrader.cli:main"
