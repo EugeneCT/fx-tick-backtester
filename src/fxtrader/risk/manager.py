@@ -29,8 +29,13 @@ class RiskManager:
     def update_equity(self, equity: float, clock: Clock) -> None:
         day = clock.now().date()
         if day != self._day:
+            # New session: reset the daily-loss baseline and re-arm the kill switch.
+            # The switch halts trading for the breached day only, then resumes — the
+            # conventional meaning of a "daily-loss" limit (and what a multi-year
+            # backtest needs; a permanent halt would silently void all later activity).
             self._day = day
             self._day_start_equity = equity
+            self.halted = False
         if self._day_start_equity is not None:
             if equity - self._day_start_equity <= -self.limits.daily_loss_limit:
                 self.halted = True

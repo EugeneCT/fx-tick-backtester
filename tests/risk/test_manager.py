@@ -77,3 +77,20 @@ def test_day_rollover_resets_day_start_equity():
     assert rm.halted is False
     rm.update_equity(98_600, next_day)  # -400 from new baseline
     assert rm.halted is False
+
+
+def test_kill_switch_rearms_next_day():
+    # Daily-loss halt is per-session: it trips on the breached day, then resets
+    # at the next day's rollover (a permanent halt would void a multi-year backtest).
+    rm = RiskManager(RiskLimits(daily_loss_limit=500))
+    c = _clock(T0)
+    rm.update_equity(100_000, c)
+    rm.update_equity(99_000, c)  # -1000 -> breach
+    assert rm.halted is True
+
+    next_day = _clock(T0 + timedelta(days=1))
+    rm.update_equity(99_000, next_day)  # new session, new baseline -> re-armed
+    assert rm.halted is False
+    # ...and it can trip again on the new day
+    rm.update_equity(98_400, next_day)  # -600 from the new baseline
+    assert rm.halted is True
