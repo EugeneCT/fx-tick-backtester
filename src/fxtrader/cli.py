@@ -8,6 +8,7 @@ from pathlib import Path
 
 import typer
 
+from fxtrader.broker.ib import IBBroker
 from fxtrader.broker.simulated import SimulatedBroker
 from fxtrader.config import BacktestConfig, load_config
 from fxtrader.core.portfolio import Portfolio
@@ -16,6 +17,7 @@ from fxtrader.data.dukascopy import Downloader, _http_download, download_range
 from fxtrader.data.feed import HistoricalTickFeed
 from fxtrader.data.store import TickStore
 from fxtrader.engine.backtest import BacktestEngine
+from fxtrader.engine.live import LiveEngine, TradingMode
 from fxtrader.metrics.performance import compute_metrics
 from fxtrader.metrics.report import _json_safe, write_html_report, write_results_json
 from fxtrader.research.optimize import walk_forward_optimize
@@ -156,6 +158,40 @@ def run_optimize(
     return _json_safe(out)
 
 
+def build_live_engine(
+    symbol: str,
+    *,
+    mode: TradingMode,
+    fast: int = 20,
+    slow: int = 50,
+    size: float = 10_000,
+    host: str = "127.0.0.1",
+    port: int = 7497,
+    client_id: int = 1,
+    starting_cash: float = 100_000.0,
+    daily_loss_limit: float = float("inf"),
+    max_position: float = float("inf"),
+    state_path: str | Path | None = "live_state.json",
+) -> LiveEngine:
+    """Wire an IBBroker + MaCrossover + RiskManager into a LiveEngine (not yet connected)."""
+    broker = IBBroker(host=host, port=port, client_id=client_id, symbols=[symbol])
+    strategy = MaCrossover(symbol=symbol, fast=fast, slow=slow, size=size)
+    portfolio = Portfolio(starting_cash)
+    risk = RiskManager(RiskLimits(max_position=max_position, daily_loss_limit=daily_loss_limit))
+    return LiveEngine(
+        broker=broker, strategy=strategy, portfolio=portfolio, risk=risk,
+        mode=mode, state_path=state_path,
+    )
+
+
+def _resolve_mode(mode: str, *, confirm_live: bool) -> TradingMode:
+    key = mode.strip().upper().replace("-", "_")
+    resolved = TradingMode(key)  # raises ValueError on a bad mode string
+    if resolved is TradingMode.LIVE and not confirm_live:
+        raise typer.BadParameter("LIVE trading requires --i-understand-live (real money).")
+    return resolved
+
+
 @app.command()
 def download(
     symbols: str = typer.Option(..., help="Comma-separated, e.g. EURUSD,GBPUSD,USDJPY"),
@@ -285,6 +321,42 @@ def optimize(
     if json_out:
         Path(json_out).write_text(json.dumps(out, indent=2, allow_nan=False))
         typer.echo(f"wrote {json_out}")
+
+
+@app.command()
+def live(
+    symbol: str = typer.Option(..., help="Single symbol, e.g. EURUSD"),
+    mode: str = typer.Option("dry-run", help="dry-run | paper | live"),
+    fast: int = typer.Option(20, help="Fast MA window (bars)"),
+    slow: int = typer.Option(50, help="Slow MA window (bars)"),
+    size: float = typer.Option(10_000, help="Position size (base units)"),
+    host: str = typer.Option("127.0.0.1", help="IB Gateway/TWS host"),
+    port: int = typer.Option(7497, help="IB port (7497 TWS paper, 4002 Gateway paper)"),
+    client_id: int = typer.Option(1, help="IB client id"),
+    daily_loss_limit: float = typer.Option(0.0, help="Daily-loss kill switch (0 = disabled)"),
+    max_position: float = typer.Option(0.0, help="Max abs position (0 = unlimited)"),
+    i_understand_live: bool = typer.Option(False, "--i-understand-live",
+                                           help="Required to enable LIVE (real money)."),
+) -> None:
+    """Trade the MA-crossover strategy live on Interactive Brokers (paper by default)."""
+    resolved = _resolve_mode(mode, confirm_live=i_understand_live)
+    engine = build_live_engine(
+        symbol=symbol, mode=resolved, fast=fast, slow=slow, size=size,
+        host=host, port=port, client_id=client_id,
+        daily_loss_limit=daily_loss_limit or float("inf"),
+        max_position=max_position or float("inf"),
+    )
+    typer.echo(f"connecting to IB {host}:{port} (client {client_id}) in {resolved.value} mode...")
+    engine.start()
+    typer.echo("connected. running — Ctrl-C to stop.")
+    try:
+        while True:
+            engine.broker._client().sleep(1)  # type: ignore[attr-defined]
+    except KeyboardInterrupt:
+        typer.echo("\nstopping...")
+    finally:
+        engine.stop()
+        typer.echo("stopped; state persisted.")
 
 
 def main() -> None:
