@@ -40,6 +40,7 @@ def _zeroed() -> dict:
         "total_return": 0.0, "cagr": 0.0, "sharpe": 0.0, "sortino": 0.0,
         "max_drawdown": 0.0, "num_trades": 0, "win_rate": 0.0,
         "profit_factor": 0.0, "final_equity": 0.0, "num_fills": 0,
+        "ruined": False,
     }
 
 
@@ -69,11 +70,17 @@ def compute_metrics(
 
     eqs = [e for _, e in equity_curve]
     metrics["final_equity"] = eqs[-1]
+    ruined = any(e <= 0 for e in eqs)
+    metrics["ruined"] = ruined
     if eqs[0] > 0:
         metrics["total_return"] = eqs[-1] / eqs[0] - 1
 
-    rets = [eqs[i] / eqs[i - 1] - 1 for i in range(1, len(eqs)) if eqs[i - 1] != 0]
-    if rets:
+    # Only measure step returns out of POSITIVE equity. A negative denominator
+    # flips the sign (a further loss would read as a gain) and would produce a
+    # misleading positive Sharpe on a blown account. On a ruined run the
+    # risk-adjusted ratios are meaningless, so we leave Sharpe/Sortino at 0.0.
+    rets = [eqs[i] / eqs[i - 1] - 1 for i in range(1, len(eqs)) if eqs[i - 1] > 0]
+    if rets and not ruined:
         n = len(rets)
         mean = sum(rets) / n
         std = (sum((r - mean) ** 2 for r in rets) / n) ** 0.5
@@ -89,7 +96,9 @@ def compute_metrics(
         peak = max(peak, e)
         if peak > 0:
             max_dd = min(max_dd, (e - peak) / peak)
-    metrics["max_drawdown"] = max_dd
+    # Floor at -100%: a wipeout is a full drawdown. Deeper (leveraged) losses are
+    # signalled via `ruined` rather than a confusing sub-(-1) figure.
+    metrics["max_drawdown"] = max(max_dd, -1.0)
 
     span = (equity_curve[-1][0] - equity_curve[0][0]).total_seconds()
     years = max(span / _SECONDS_PER_YEAR, 1e-9)

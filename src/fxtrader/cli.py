@@ -163,11 +163,15 @@ def backtest(
     slow: int = typer.Option(50, help="Slow MA window (bars)"),
     size: float = typer.Option(10_000, help="Position size (base units)"),
     bar_minutes: int = typer.Option(1, help="Bar interval in minutes"),
+    max_position: float = typer.Option(0.0, help="Max abs position per symbol (0 = unlimited)"),
+    daily_loss_limit: float = typer.Option(0.0, help="Daily-loss kill switch (0 = disabled)"),
 ) -> None:
     """Backtest the MA-crossover strategy over stored ticks."""
     _result, metrics = run_backtest(
         symbol=symbol, start=_parse_day(start), end=_parse_day(end),
         data_dir=data_dir, fast=fast, slow=slow, size=size, bar_minutes=bar_minutes,
+        max_position=max_position or float("inf"),
+        daily_loss_limit=daily_loss_limit or float("inf"),
     )
     typer.echo(f"symbol={symbol}  bars={bar_minutes}m  MA({fast}/{slow})")
     typer.echo(f"  trades        : {metrics['num_trades']}")
@@ -178,6 +182,7 @@ def backtest(
     typer.echo(f"  Sortino       : {metrics['sortino']:.2f}")
     typer.echo(f"  max drawdown  : {metrics['max_drawdown']:.2%}")
     typer.echo(f"  profit factor : {metrics['profit_factor']:.2f}")
+    typer.echo(f"  ruined        : {metrics['ruined']}")
     typer.echo(f"  final equity  : {metrics['final_equity']:,.2f}")
 
 

@@ -67,3 +67,22 @@ def test_empty_curve_is_safe():
     assert m["num_trades"] == 0
     assert m["sharpe"] == 0.0
     assert m["total_return"] == 0.0
+    assert m["ruined"] is False
+
+
+def test_metrics_robust_to_account_ruin():
+    # Equity blows through zero. Risk-adjusted ratios must NOT come out positive
+    # (negative denominators flip the sign of step returns), drawdown floors at
+    # -100%, and the run is flagged ruined.
+    m = compute_metrics(_curve([100_000, 50_000, -10_000, 5_000]), [], periods_per_year=252)
+    assert m["ruined"] is True
+    assert m["sharpe"] == 0.0
+    assert m["sortino"] == 0.0
+    assert m["max_drawdown"] == -1.0
+    assert round(m["total_return"], 4) == round(5_000 / 100_000 - 1, 4)  # -0.95
+
+
+def test_healthy_curve_not_flagged_ruined():
+    m = compute_metrics(_curve([100_000, 101_000, 102_000]), [], periods_per_year=8760)
+    assert m["ruined"] is False
+    assert m["sharpe"] > 0
