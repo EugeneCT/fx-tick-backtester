@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import math
 from pathlib import Path
 
-from fxtrader.config import BacktestConfig
-from fxtrader.engine.backtest import BacktestResult
-from fxtrader.metrics.performance import trade_pnls
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402  (must follow matplotlib.use)
+
+from fxtrader.config import BacktestConfig  # noqa: E402
+from fxtrader.engine.backtest import BacktestResult  # noqa: E402
+from fxtrader.metrics.performance import trade_pnls  # noqa: E402
 
 
 def _json_safe(value):
@@ -51,3 +58,49 @@ def write_results_json(
     # _json_safe) rather than silently emitting `Infinity`/`NaN`.
     payload = json.dumps(build_results(config, result, metrics), indent=2, allow_nan=False)
     Path(path).write_text(payload)
+
+
+def _equity_png_base64(result: BacktestResult) -> str:
+    fig, ax = plt.subplots(figsize=(10, 4))
+    if result.equity_curve:
+        xs = [ts for ts, _ in result.equity_curve]
+        ys = [equity for _, equity in result.equity_curve]
+        ax.plot(xs, ys, color="#1f77b4", linewidth=1.0)
+    ax.set_title("Equity curve")
+    ax.set_ylabel("Equity")
+    ax.grid(True, alpha=0.3)
+    fig.autofmt_xdate()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=90, bbox_inches="tight")
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def write_html_report(
+    path: str | Path,
+    config: BacktestConfig,
+    result: BacktestResult,
+    metrics: dict,
+) -> None:
+    png = _equity_png_base64(result)
+    rows = "".join(
+        f"<tr><td>{key.replace('_', ' ').title()}</td><td>{value}</td></tr>"
+        for key, value in metrics.items()
+    )
+    html = f"""<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Backtest — {config.symbol}</title>
+<style>
+body {{ font-family: system-ui, sans-serif; margin: 2rem; color: #222; }}
+table {{ border-collapse: collapse; }} td {{ border: 1px solid #ddd; padding: 4px 10px; }}
+td:first-child {{ color: #555; }}
+</style></head>
+<body>
+<h1>Backtest — {config.symbol}</h1>
+<p>MA({config.fast}/{config.slow}) · {config.bar_minutes}m bars · {config.start} → {config.end}</p>
+<img src="data:image/png;base64,{png}" alt="Equity curve">
+<h2>Metrics</h2>
+<table>{rows}</table>
+</body></html>
+"""
+    Path(path).write_text(html)

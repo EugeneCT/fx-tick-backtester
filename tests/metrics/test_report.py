@@ -5,7 +5,7 @@ from fxtrader.config import BacktestConfig
 from fxtrader.core.types import Fill, Side
 from fxtrader.engine.backtest import BacktestResult
 from fxtrader.metrics.performance import compute_metrics
-from fxtrader.metrics.report import build_results, write_results_json
+from fxtrader.metrics.report import build_results, write_html_report, write_results_json
 
 
 def _result():
@@ -81,3 +81,25 @@ def test_infinite_profit_factor_becomes_null_and_stays_strict_json(tmp_path):
     text = path.read_text()
     json.loads(text, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
     assert "Infinity" not in text
+
+
+def test_write_html_report_is_self_contained(tmp_path):
+    result = _result()
+    metrics = compute_metrics(result.equity_curve, result.fills, periods_per_year=8760)
+    path = tmp_path / "report.html"
+    write_html_report(path, _config(), result, metrics)
+
+    html = path.read_text()
+    assert "<html" in html.lower()
+    assert "EURUSD" in html
+    assert "Sharpe" in html
+    # equity plot embedded as a base64 PNG (self-contained, no external file)
+    assert "data:image/png;base64," in html
+
+
+def test_write_html_report_handles_empty_curve(tmp_path):
+    result = BacktestResult(equity_curve=[], fills=[], final_equity=0.0)
+    metrics = compute_metrics([], [], periods_per_year=8760)
+    path = tmp_path / "empty.html"
+    write_html_report(path, _config(), result, metrics)  # must not raise
+    assert path.exists()
