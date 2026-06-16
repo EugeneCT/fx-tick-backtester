@@ -23,3 +23,10 @@ def test_live_command_blocks_live_without_flag():
     with pytest.raises(typer.BadParameter):
         _resolve_mode("live", confirm_live=False)
     assert _resolve_mode("live", confirm_live=True) is TradingMode.LIVE
+
+
+def test_resolve_mode_rejects_bogus_mode_cleanly():
+    from fxtrader.cli import _resolve_mode
+    # A bad mode string must surface a clean typer.BadParameter, not a raw ValueError.
+    with pytest.raises(typer.BadParameter):
+        _resolve_mode("bogus", confirm_live=False)

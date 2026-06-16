@@ -186,7 +186,10 @@ def build_live_engine(
 
 def _resolve_mode(mode: str, *, confirm_live: bool) -> TradingMode:
     key = mode.strip().upper().replace("-", "_")
-    resolved = TradingMode(key)  # raises ValueError on a bad mode string
+    try:
+        resolved = TradingMode(key)
+    except ValueError:
+        raise typer.BadParameter(f"mode must be dry-run | paper | live, got {mode!r}") from None
     if resolved is TradingMode.LIVE and not confirm_live:
         raise typer.BadParameter("LIVE trading requires --i-understand-live (real money).")
     return resolved
