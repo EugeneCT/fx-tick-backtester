@@ -1,6 +1,8 @@
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from fxtrader.core.portfolio import Portfolio
 from fxtrader.core.types import Fill, Side, Tick
 from fxtrader.engine.live import LiveEngine, TradingMode
@@ -90,3 +92,22 @@ def test_state_persisted_on_tick(tmp_path):
     state = json.loads((tmp_path / "state.json").read_text())
     assert state["positions"]["EURUSD"] == 10_000
     assert "equity" in state and "halted" in state
+
+
+def test_stop_is_failsafe_when_on_stop_raises(tmp_path):
+    class _Boom(Strategy):
+        def on_stop(self):
+            raise RuntimeError("boom")
+
+    broker = _FakeBroker()
+    eng = _engine(_Boom(), TradingMode.PAPER, broker=broker, tmp_path=tmp_path)
+    eng.start()
+    eng._on_fill(Fill("o", "EURUSD", Side.BUY, 10_000, 1.10,
+                      datetime(2024, 1, 2, tzinfo=timezone.utc)))
+    eng._on_tick(_tick(1.11))
+
+    # on_stop() raises, but state must still be persisted and the broker disconnected.
+    with pytest.raises(RuntimeError):
+        eng.stop()
+    assert (tmp_path / "state.json").exists()
+    assert broker.connected is False

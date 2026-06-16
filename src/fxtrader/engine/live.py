@@ -57,9 +57,13 @@ class LiveEngine:
         self.strategy.on_start()
 
     def stop(self) -> None:
-        self.strategy.on_stop()
-        self._persist_state()
-        self.broker.disconnect()
+        # Fail-safe: even if on_stop() raises, always persist state and close the
+        # broker connection (never strand the IB socket or lose the last state).
+        try:
+            self.strategy.on_stop()
+        finally:
+            self._persist_state()
+            self.broker.disconnect()
 
     def _on_order(self, order: Order) -> None:
         if self.risk.halted:
