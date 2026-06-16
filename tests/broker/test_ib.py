@@ -20,7 +20,7 @@ class _Event:
 
 class FakeIB:
     def __init__(self):
-        self.execDetailsEvent = _Event()
+        self.commissionReportEvent = _Event()
         self.pendingTickersEvent = _Event()
         self.placed = []
         self.cancelled = []
@@ -65,7 +65,9 @@ def test_submit_market_order_places_ib_order():
     assert order.totalQuantity == 10_000
 
 
-def test_exec_details_emits_core_fill():
+def test_commission_report_emits_core_fill_with_real_commission():
+    # Fills are recognized on commissionReportEvent (which carries the real commission),
+    # not execDetailsEvent (which arrives first with an empty commission report).
     ib = FakeIB()
     b = IBBroker(ib=ib, symbols=["EURUSD"])
     fills = []
@@ -73,12 +75,9 @@ def test_exec_details_emits_core_fill():
 
     ts = datetime(2024, 1, 2, 9, 0, tzinfo=timezone.utc)
     execution = SimpleNamespace(orderId=42, side="BOT", shares=10_000, price=1.1005, time=ts)
-    fill = SimpleNamespace(
-        contract=_fx("EUR", "USD"),
-        execution=execution,
-        commissionReport=SimpleNamespace(commission=2.5),
-    )
-    b._on_exec_details(SimpleNamespace(), fill)
+    fill = SimpleNamespace(contract=_fx("EUR", "USD"), execution=execution, commissionReport=None)
+    report = SimpleNamespace(commission=2.5)
+    b._on_commission_report(SimpleNamespace(), fill, report)
 
     assert len(fills) == 1
     f = fills[0]
@@ -98,7 +97,7 @@ def test_sell_execution_maps_to_sell_side():
     execution = SimpleNamespace(orderId=1, side="SLD", shares=5_000, price=1.10,
                                 time=datetime(2024, 1, 2, tzinfo=timezone.utc))
     fill = SimpleNamespace(contract=_fx("EUR", "USD"), execution=execution, commissionReport=None)
-    b._on_exec_details(SimpleNamespace(), fill)
+    b._on_commission_report(SimpleNamespace(), fill, None)  # no report -> commission 0.0
     assert fills[0].side is Side.SELL
     assert fills[0].commission == 0.0
 
@@ -129,6 +128,32 @@ def test_pending_tickers_skips_nan_quotes():
     assert ticks == []
 
 
+def test_pending_tickers_skips_ib_no_data_sentinel():
+    # IB sends bid/ask == -1 when there is no market data; must be rejected.
+    ib = FakeIB()
+    b = IBBroker(ib=ib, symbols=["EURUSD"])
+    ticks = []
+    b.set_tick_callback(ticks.append)
+    ticker = SimpleNamespace(contract=_fx("EUR", "USD"), bid=-1.0, ask=-1.0,
+                             bidSize=-1.0, askSize=-1.0, time=None)
+    b._on_pending_tickers([ticker])
+    assert ticks == []
+
+
+def test_pending_tickers_sanitizes_nan_sizes():
+    # A live Ticker defaults bidSize/askSize to NaN until populated -> volume must be 0.0.
+    ib = FakeIB()
+    b = IBBroker(ib=ib, symbols=["EURUSD"])
+    ticks = []
+    b.set_tick_callback(ticks.append)
+    nan = float("nan")
+    ticker = SimpleNamespace(contract=_fx("EUR", "USD"), bid=1.1000, ask=1.1002,
+                             bidSize=nan, askSize=nan, time=None)
+    b._on_pending_tickers([ticker])
+    assert len(ticks) == 1
+    assert ticks[0].bid_volume == 0.0 and ticks[0].ask_volume == 0.0
+
+
 def test_positions_maps_to_symbol_qty():
     ib = FakeIB()
     ib._positions = [SimpleNamespace(contract=_fx("EUR", "USD"), position=10_000.0)]
@@ -141,7 +166,7 @@ def test_connect_wires_events_and_disconnect():
     b = IBBroker(ib=ib, symbols=["EURUSD"])
     b.connect()
     assert ib.isConnected()
-    assert b._on_exec_details in ib.execDetailsEvent.handlers
+    assert b._on_commission_report in ib.commissionReportEvent.handlers
     assert b._on_pending_tickers in ib.pendingTickersEvent.handlers
     b.disconnect()
     assert not ib.isConnected()

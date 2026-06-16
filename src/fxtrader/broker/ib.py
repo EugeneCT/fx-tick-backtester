@@ -41,7 +41,10 @@ class IBBroker(Broker):
     def connect(self) -> None:
         ib = self._client()
         ib.connect(self.host, self.port, clientId=self.client_id)
-        ib.execDetailsEvent += self._on_exec_details
+        # Recognize a fill on the commission report (not execDetails): ib_async emits
+        # execDetailsEvent first with an EMPTY commission report, then commissionReportEvent
+        # with the real cost. Emitting here gives correct commissions on live fills.
+        ib.commissionReportEvent += self._on_commission_report
         ib.pendingTickersEvent += self._on_pending_tickers
         for symbol in self.symbols:
             ib.reqMktData(self._contract(symbol))
@@ -90,13 +93,20 @@ class IBBroker(Broker):
                 return float(value.value)
         return None
 
-    def _on_exec_details(self, trade, fill) -> None:
+    @staticmethod
+    def _size(value) -> float:
+        """Sanitize an IB size: None or non-finite (NaN) -> 0.0."""
+        if value is None or not math.isfinite(value):
+            return 0.0
+        return float(value)
+
+    def _on_commission_report(self, trade, fill, report) -> None:
         execution = fill.execution
         side = Side.BUY if execution.side == "BOT" else Side.SELL
         commission = 0.0
-        report = getattr(fill, "commissionReport", None)
         if report is not None and getattr(report, "commission", None) is not None:
-            commission = float(report.commission)
+            if math.isfinite(report.commission):
+                commission = float(report.commission)
         self._emit_fill(
             Fill(
                 order_id=str(execution.orderId),
@@ -112,15 +122,18 @@ class IBBroker(Broker):
     def _on_pending_tickers(self, tickers) -> None:
         for ticker in tickers:
             bid, ask = ticker.bid, ticker.ask
-            if bid is None or ask is None or math.isnan(bid) or math.isnan(ask):
+            # Reject incomplete quotes: None, NaN/inf, or IB's -1 "no data" sentinel.
+            if bid is None or ask is None:
+                continue
+            if not math.isfinite(bid) or not math.isfinite(ask) or bid <= 0 or ask <= 0:
                 continue
             tick = Tick(
                 symbol=self._symbol_of(ticker.contract),
                 ts=ticker.time or datetime.now(timezone.utc),
                 bid=float(bid),
                 ask=float(ask),
-                bid_volume=float(ticker.bidSize or 0.0),
-                ask_volume=float(ticker.askSize or 0.0),
+                bid_volume=self._size(ticker.bidSize),
+                ask_volume=self._size(ticker.askSize),
             )
             self._last_tick[tick.symbol] = tick
             self._emit_tick(tick)
