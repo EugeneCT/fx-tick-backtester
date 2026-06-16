@@ -24,6 +24,9 @@ packages = ["src/fxtrader"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+# importlib mode lets same-named test files coexist across dirs (e.g. strategy/test_base.py
+# and broker/test_base.py) without __init__.py files.
+addopts = "--import-mode=importlib"
 
 [tool.ruff]
 line-length = 100
