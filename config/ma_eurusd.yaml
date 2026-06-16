@@ -1,0 +1,9 @@
+symbol: EURUSD
+start: 2024-01-02
+end: 2024-02-01
+fast: 20
+slow: 50
+bar_minutes: 5
+size: 10000
+daily_loss_limit: 5000
+max_position: 50000
