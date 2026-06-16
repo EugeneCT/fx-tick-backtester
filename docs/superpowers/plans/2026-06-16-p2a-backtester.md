@@ -1061,10 +1061,13 @@ class BacktestEngine:
 
             equity = self.portfolio.equity(self._last_price)
             self.risk.update_equity(equity, self.clock)
-            if self.risk.halted and not self._flattened:
-                self._flatten()
-
-            if not self.risk.halted:
+            if self.risk.halted:
+                if not self._flattened:
+                    self._flatten()
+            else:
+                # Not halted (incl. after the daily kill switch re-arms next session):
+                # clear the flatten latch so a future breach can flatten again.
+                self._flattened = False
                 self.strategy.on_tick(tick)
                 if self.bar_interval is not None:
                     bar = self._resampler(tick.symbol).update(tick)
