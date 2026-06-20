@@ -23,7 +23,7 @@ from fxtrader.metrics.report import _json_safe, write_html_report, write_results
 from fxtrader.research.optimize import walk_forward_optimize
 from fxtrader.risk.manager import RiskLimits, RiskManager
 from fxtrader.strategy.examples.ma_crossover import MaCrossover
-from fxtrader.strategy.registry import make_exit_policy, make_strategy
+from fxtrader.strategy.registry import STRATEGY_PARAMS, make_exit_policy, make_strategy
 
 app = typer.Typer(add_completion=False, help="fxtrader CLI")
 
@@ -142,14 +142,29 @@ def run_backtest_config(config: BacktestConfig, data_dir: str | Path):
     return run_backtest(data_dir=data_dir, **config.to_run_kwargs())
 
 
-def _ma_run_fn(symbol: str, data_dir: str | Path, bar_minutes: int, size: float):
-    """Build a run_fn(params, start, end) -> metrics for the MA grid (None on invalid params)."""
+def _strategy_run_fn(
+    strategy_name: str,
+    symbol: str,
+    data_dir: str | Path,
+    bar_minutes: int,
+    base_params: dict,
+    exit_kind: str,
+):
+    """Build a run_fn(params, start, end) -> metrics for any strategy grid (None on invalid params)."""
     def run_fn(params: dict, start: datetime, end: datetime):
-        if params["fast"] >= params["slow"]:
+        p = {**base_params, **params}
+        if p["fast"] >= p["slow"]:
+            return None
+        if strategy_name == "trend" and not (p["fast"] < p["slow"] < p["trend"]):
             return None
         _result, metrics = run_backtest(
             symbol=symbol, start=start, end=end, data_dir=data_dir,
-            fast=params["fast"], slow=params["slow"], size=size, bar_minutes=bar_minutes,
+            fast=p["fast"], slow=p["slow"], size=p.get("size", 10_000),
+            bar_minutes=bar_minutes, strategy_name=strategy_name,
+            trend=p.get("trend", 0), exit_kind=exit_kind,
+            stop_pips=p.get("stop_pips", 0.0), tp_pips=p.get("tp_pips", 0.0),
+            atr_period=p.get("atr_period", 14), stop_atr=p.get("stop_atr", 0.0),
+            tp_atr=p.get("tp_atr", 0.0),
         )
         return metrics
 
@@ -169,11 +184,36 @@ def run_optimize(
     bar_minutes: int = 5,
     size: float = 10_000,
     objective: str = "sharpe",
+    strategy: str = "ma",
+    trend_values: list[int] | None = None,
+    exit_kind: str = "none",
+    stop_pips: float = 0.0,
+    tp_pips: float = 0.0,
+    atr_period: int = 14,
+    stop_atr: float = 0.0,
+    tp_atr: float = 0.0,
 ) -> dict:
-    """Walk-forward grid optimization of MA fast/slow over stored ticks. Returns strict-JSON-safe dict."""
-    run_fn = _ma_run_fn(symbol, data_dir, bar_minutes, size)
+    """Walk-forward grid optimization over stored ticks. Returns strict-JSON-safe dict."""
+    # Build the signal param grid from the selected strategy's keys.
+    # MA: {"fast": ..., "slow": ...}  (UNCHANGED — existing tests assert exactly this)
+    # Trend: {"fast": ..., "slow": ..., "trend": ...}
+    grid: dict[str, list[int]] = {"fast": fast_values, "slow": slow_values}
+    if strategy == "trend":
+        grid["trend"] = trend_values or []
+
+    # Fixed (non-gridded) params shared across all run_fn calls.
+    base_params: dict = {
+        "size": size,
+        "stop_pips": stop_pips,
+        "tp_pips": tp_pips,
+        "atr_period": atr_period,
+        "stop_atr": stop_atr,
+        "tp_atr": tp_atr,
+    }
+
+    run_fn = _strategy_run_fn(strategy, symbol, data_dir, bar_minutes, base_params, exit_kind)
     out = walk_forward_optimize(
-        run_fn, start, end, {"fast": fast_values, "slow": slow_values},
+        run_fn, start, end, grid,
         n_splits=n_splits, train_ratio=train_ratio, objective=objective,
     )
     return _json_safe(out)
@@ -355,12 +395,25 @@ def optimize(
     bar_minutes: int = typer.Option(5, help="Bar interval in minutes"),
     objective: str = typer.Option("sharpe", help="Metric to maximize on train"),
     json_out: str = typer.Option(None, "--json", help="Write optimize results to this path"),
+    strategy: str = typer.Option("ma", help="ma | trend"),
+    trend: str = typer.Option(None, "--trend", help="Comma-separated trend MA windows (trend strategy)"),
+    exit_: str = typer.Option("none", "--exit", help="none | fixed | atr"),
+    stop_pips: float = typer.Option(0.0, help="Stop in pips (exit=fixed)"),
+    tp_pips: float = typer.Option(0.0, help="Take-profit in pips (exit=fixed)"),
+    atr_period: int = typer.Option(14, help="ATR period (exit=atr)"),
+    stop_atr: float = typer.Option(0.0, help="Stop = mult x ATR (exit=atr)"),
+    tp_atr: float = typer.Option(0.0, help="TP = mult x ATR (exit=atr)"),
 ) -> None:
-    """Walk-forward optimize the MA-crossover params over stored ticks."""
+    """Walk-forward optimize strategy params over stored ticks."""
     out = run_optimize(
         symbol=symbol, start=_parse_day(start), end=_parse_day(end), data_dir=data_dir,
         fast_values=_int_list(fast), slow_values=_int_list(slow),
         n_splits=n_splits, train_ratio=train_ratio, bar_minutes=bar_minutes, objective=objective,
+        strategy=strategy,
+        trend_values=_int_list(trend) if trend else None,
+        exit_kind=exit_,
+        stop_pips=stop_pips, tp_pips=tp_pips,
+        atr_period=atr_period, stop_atr=stop_atr, tp_atr=tp_atr,
     )
     typer.echo(f"symbol={symbol}  objective={objective}  folds={len(out['folds'])}")
     for i, fr in enumerate(out["folds"]):
