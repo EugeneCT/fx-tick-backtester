@@ -23,6 +23,7 @@ from fxtrader.metrics.report import _json_safe, write_html_report, write_results
 from fxtrader.research.optimize import walk_forward_optimize
 from fxtrader.risk.manager import RiskLimits, RiskManager
 from fxtrader.strategy.examples.ma_crossover import MaCrossover
+from fxtrader.strategy.registry import make_exit_policy, make_strategy
 
 app = typer.Typer(add_completion=False, help="fxtrader CLI")
 
@@ -95,11 +96,31 @@ def run_backtest(
     slippage: float = 0.0,
     daily_loss_limit: float = float("inf"),
     max_position: float = float("inf"),
+    strategy_name: str = "ma",
+    trend: int = 0,
+    exit_kind: str = "none",
+    stop_pips: float = 0.0,
+    tp_pips: float = 0.0,
+    atr_period: int = 0,
+    stop_atr: float = 0.0,
+    tp_atr: float = 0.0,
 ):
-    """Run a MaCrossover backtest over stored ticks. Returns (BacktestResult, metrics)."""
+    """Run a backtest over stored ticks. Returns (BacktestResult, metrics)."""
     store = TickStore(data_dir)
     feed = HistoricalTickFeed(store, [symbol], start, end)
-    strategy = MaCrossover(symbol=symbol, fast=fast, slow=slow, size=size)
+    exit_policy = make_exit_policy(
+        exit_kind,
+        params={
+            "stop_pips": stop_pips, "tp_pips": tp_pips,
+            "atr_period": atr_period, "stop_atr": stop_atr, "tp_atr": tp_atr,
+        },
+        symbol=symbol,
+    )
+    strategy = make_strategy(
+        strategy_name, symbol=symbol,
+        params={"fast": fast, "slow": slow, "trend": trend, "size": size},
+        exit_policy=exit_policy,
+    )
     broker = SimulatedBroker(
         commission_rate=commission_rate, min_commission=min_commission, slippage=slippage
     )
@@ -253,8 +274,36 @@ def backtest(
     config: str = typer.Option(None, "--config", help="YAML run config (supersedes the flags above)"),
     json_out: str = typer.Option(None, "--json", help="Write results.json to this path"),
     html_out: str = typer.Option(None, "--html", help="Write an HTML report to this path"),
+    strategy: str = typer.Option("ma", help="ma | trend"),
+    trend: int = typer.Option(200, help="Trend-filter MA window (trend strategy)"),
+    exit_: str = typer.Option("none", "--exit", help="none | fixed | atr"),
+    stop_pips: float = typer.Option(0.0, help="Stop in pips (exit=fixed)"),
+    tp_pips: float = typer.Option(0.0, help="Take-profit in pips (exit=fixed)"),
+    atr_period: int = typer.Option(14, help="ATR period (exit=atr)"),
+    stop_atr: float = typer.Option(0.0, help="Stop = mult x ATR (exit=atr)"),
+    tp_atr: float = typer.Option(0.0, help="TP = mult x ATR (exit=atr)"),
 ) -> None:
-    """Backtest the MA-crossover strategy over stored ticks."""
+    """Backtest a strategy over stored ticks."""
+    if strategy not in ("ma", "trend"):
+        raise typer.BadParameter("strategy must be ma | trend")
+    if strategy == "trend":
+        if not (symbol and start and end):
+            raise typer.BadParameter("trend strategy needs --symbol/--start/--end")
+        result, metrics = run_backtest(
+            symbol=symbol, start=_parse_day(start), end=_parse_day(end), data_dir=data_dir,
+            fast=fast, slow=slow, size=size, bar_minutes=bar_minutes,
+            strategy_name="trend", trend=trend, exit_kind=exit_,
+            stop_pips=stop_pips, tp_pips=tp_pips,
+            atr_period=atr_period, stop_atr=stop_atr, tp_atr=tp_atr,
+            daily_loss_limit=daily_loss_limit or float("inf"),
+            max_position=max_position or float("inf"),
+        )
+        typer.echo(f"symbol={symbol}  bars={bar_minutes}m  trend MA({fast}/{slow}/{trend})  exit={exit_}")
+        typer.echo(f"  trades        : {metrics['num_trades']}")
+        typer.echo(f"  total return  : {metrics['total_return']:.2%}")
+        typer.echo(f"  Sharpe        : {metrics['sharpe']:.2f}")
+        typer.echo(f"  profit factor : {metrics['profit_factor']:.2f}")
+        return
     if config is not None:
         cfg = load_config(config)
     else:
