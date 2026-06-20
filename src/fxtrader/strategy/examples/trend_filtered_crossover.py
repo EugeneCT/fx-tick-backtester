@@ -35,6 +35,7 @@ class TrendFilteredCrossover(Strategy):
         self._entry_price: float | None = None
         self._stop_dist: float | None = None
         self._tp_dist: float | None = None
+        self._last_exit_reason: str | None = None
 
     def on_bar(self, bar: Bar) -> None:
         if bar.symbol != self.symbol:
@@ -58,13 +59,17 @@ class TrendFilteredCrossover(Strategy):
             if position > 0:  # long
                 if self._stop_dist is not None and bar.low <= entry - self._stop_dist:
                     hit = True
+                    self._last_exit_reason = "stop"
                 elif self._tp_dist is not None and bar.high >= entry + self._tp_dist:
                     hit = True
+                    self._last_exit_reason = "tp"
             else:  # short
                 if self._stop_dist is not None and bar.high >= entry + self._stop_dist:
                     hit = True
+                    self._last_exit_reason = "stop"
                 elif self._tp_dist is not None and bar.low <= entry - self._tp_dist:
                     hit = True
+                    self._last_exit_reason = "tp"
             if hit:
                 side = Side.SELL if position > 0 else Side.BUY
                 self.order(self.symbol, side, abs(position))

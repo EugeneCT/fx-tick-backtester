@@ -167,6 +167,9 @@ def test_same_bar_stop_and_tp_stop_wins():
     )
     assert len(orders) == 2
     assert orders[-1].side == Side.SELL
+    assert s._last_exit_reason == "stop", (
+        f"Expected stop to win same-bar tie; got exit_reason={s._last_exit_reason!r}"
+    )
 
 
 def test_no_exit_policy_no_stop_tp():
