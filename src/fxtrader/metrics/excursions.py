@@ -19,7 +19,7 @@ class TradeRecord:
 
 
 def _round_trips(fills: list[Fill]):
-    """Yield (entry_ts, exit_ts, direction, entry_price) per closed round trip, single-symbol."""
+    """Yield (entry_ts, exit_ts, direction, entry_price, pnl) per closed round trip, single-symbol."""
     qty = 0.0
     entry_price = 0.0
     entry_ts: datetime | None = None
@@ -37,7 +37,9 @@ def _round_trips(fills: list[Fill]):
             qty += signed
             continue
         # reducing / closing
-        yield (entry_ts, f.ts, direction, entry_price)
+        closing = min(abs(signed), abs(qty))
+        pnl = (f.price - entry_price) * closing * direction
+        yield (entry_ts, f.ts, direction, entry_price, pnl)
         qty += signed
         if qty != 0:                            # reversed straight through zero
             entry_price = f.price
@@ -47,7 +49,7 @@ def _round_trips(fills: list[Fill]):
 
 def trade_excursions(fills: list[Fill], bars: list[Bar], pip_size: float) -> list[TradeRecord]:
     out: list[TradeRecord] = []
-    for entry_ts, exit_ts, direction, entry_price in _round_trips(fills):
+    for entry_ts, exit_ts, direction, entry_price, pnl in _round_trips(fills):
         mae = mfe = 0.0
         for b in bars:
             if b.ts < entry_ts or b.ts > exit_ts:
@@ -60,14 +62,7 @@ def trade_excursions(fills: list[Fill], bars: list[Bar], pip_size: float) -> lis
                 mfe = max(mfe, entry_price - b.low)
         out.append(TradeRecord(
             entry_ts=entry_ts, exit_ts=exit_ts, direction=direction,
-            pnl=_pnl(fills, entry_ts, exit_ts, direction, entry_price),
+            pnl=pnl,
             mae_pips=mae / pip_size, mfe_pips=mfe / pip_size,
         ))
     return out
-
-
-def _pnl(fills, entry_ts, exit_ts, direction, entry_price) -> float:
-    exit_fill = next((f for f in fills if f.ts == exit_ts), None)
-    if exit_fill is None:
-        return 0.0
-    return (exit_fill.price - entry_price) * exit_fill.quantity * direction
