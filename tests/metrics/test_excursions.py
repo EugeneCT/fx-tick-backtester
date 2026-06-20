@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from fxtrader.core.types import Bar, Fill, Side
-from fxtrader.metrics.excursions import trade_excursions
+from fxtrader.metrics.excursions import TradeRecord, trade_excursions, summarize_excursions
 
 T0 = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
@@ -106,3 +106,20 @@ def test_short_round_trip_mae_mfe():
     assert r.mae_pips == pytest.approx(8.0)
     # mfe: min low vs entry 1.2000 → 1.2000-1.1985 = 15 pips
     assert r.mfe_pips == pytest.approx(15.0)
+
+
+def _rec(pnl, mae, mfe):
+    return TradeRecord(T0, T0, 1, pnl, mae, mfe)
+
+
+def test_summary_splits_winners_and_losers():
+    recs = [_rec(5, 4, 30), _rec(8, 6, 40), _rec(-3, 25, 5), _rec(-9, 35, 3)]
+    s = summarize_excursions(recs)
+    assert s["n_trades"] == 4
+    assert s["n_winners"] == 2 and s["n_losers"] == 2
+    assert s["winners"]["mae_p50"] <= s["losers"]["mae_p50"]  # winners bleed less
+
+
+def test_summary_empty_is_zeroed():
+    s = summarize_excursions([])
+    assert s["n_trades"] == 0
