@@ -50,7 +50,29 @@ class TrendFilteredCrossover(Strategy):
         trend_ma = sum(closes) / self.trend
         trend_dir = 1 if bar.close > trend_ma else (-1 if bar.close < trend_ma else 0)
 
-        # (exit-policy stop/TP check is added in Task 5, before bias update)
+        # --- exit check FIRST (against the open position), bar-granular ---
+        position = self.portfolio.position(self.symbol).quantity
+        if position != 0 and self._entry_price is not None:
+            entry = self._entry_price
+            hit = False
+            if position > 0:  # long
+                if self._stop_dist is not None and bar.low <= entry - self._stop_dist:
+                    hit = True
+                elif self._tp_dist is not None and bar.high >= entry + self._tp_dist:
+                    hit = True
+            else:  # short
+                if self._stop_dist is not None and bar.high >= entry + self._stop_dist:
+                    hit = True
+                elif self._tp_dist is not None and bar.low <= entry - self._tp_dist:
+                    hit = True
+            if hit:
+                side = Side.SELL if position > 0 else Side.BUY
+                self.order(self.symbol, side, abs(position))
+                self._bias = 0
+                self._pos_dir = 0
+                self._entry_price = None
+                self._stop_dist = self._tp_dist = None
+                return  # done with this bar
 
         if self._prev_fast is not None and self._prev_slow is not None:
             if self._prev_fast <= self._prev_slow and fast > slow:
