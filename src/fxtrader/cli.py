@@ -23,7 +23,7 @@ from fxtrader.metrics.report import _json_safe, write_html_report, write_results
 from fxtrader.research.optimize import walk_forward_optimize
 from fxtrader.risk.manager import RiskLimits, RiskManager
 from fxtrader.strategy.examples.ma_crossover import MaCrossover
-from fxtrader.strategy.registry import STRATEGY_PARAMS, make_exit_policy, make_strategy
+from fxtrader.strategy.registry import make_exit_policy, make_strategy
 
 app = typer.Typer(add_completion=False, help="fxtrader CLI")
 
