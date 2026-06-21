@@ -104,6 +104,10 @@ def run_backtest(
     atr_period: int = 0,
     stop_atr: float = 0.0,
     tp_atr: float = 0.0,
+    lookback: int = 0,
+    entry_z: float = 0.0,
+    exit_z: float = 0.0,
+    er_threshold: float = 0.0,
 ):
     """Run a backtest over stored ticks. Returns (BacktestResult, metrics)."""
     store = TickStore(data_dir)
@@ -118,7 +122,10 @@ def run_backtest(
     )
     strategy = make_strategy(
         strategy_name, symbol=symbol,
-        params={"fast": fast, "slow": slow, "trend": trend, "size": size},
+        params={
+            "fast": fast, "slow": slow, "trend": trend, "size": size,
+            "lookback": lookback, "entry_z": entry_z, "exit_z": exit_z, "er_threshold": er_threshold,
+        },
         exit_policy=exit_policy,
     )
     broker = SimulatedBroker(
@@ -153,18 +160,24 @@ def _strategy_run_fn(
     """Build a run_fn(params, start, end) -> metrics for any strategy grid (None on invalid params)."""
     def run_fn(params: dict, start: datetime, end: datetime):
         p = {**base_params, **params}
-        if p["fast"] >= p["slow"]:
-            return None
-        if strategy_name == "trend" and not (p["fast"] < p["slow"] < p["trend"]):
-            return None
+        if strategy_name in ("ma", "trend"):
+            if p["fast"] >= p["slow"]:
+                return None
+            if strategy_name == "trend" and not (p["fast"] < p["slow"] < p["trend"]):
+                return None
+        elif strategy_name == "meanrev":
+            if not (p["lookback"] >= 2 and 0 <= p["exit_z"] < p["entry_z"] and 0 < p["er_threshold"] <= 1):
+                return None
         _result, metrics = run_backtest(
             symbol=symbol, start=start, end=end, data_dir=data_dir,
-            fast=p["fast"], slow=p["slow"], size=p.get("size", 10_000),
+            fast=p.get("fast", 20), slow=p.get("slow", 50), size=p.get("size", 10_000),
             bar_minutes=bar_minutes, strategy_name=strategy_name,
             trend=p.get("trend", 0), exit_kind=exit_kind,
             stop_pips=p.get("stop_pips", 0.0), tp_pips=p.get("tp_pips", 0.0),
             atr_period=p.get("atr_period", 14), stop_atr=p.get("stop_atr", 0.0),
             tp_atr=p.get("tp_atr", 0.0),
+            lookback=p.get("lookback", 0), entry_z=p.get("entry_z", 0.0),
+            exit_z=p.get("exit_z", 0.0), er_threshold=p.get("er_threshold", 0.0),
         )
         return metrics
 
@@ -177,8 +190,8 @@ def run_optimize(
     end: datetime,
     data_dir: str | Path,
     *,
-    fast_values: list[int],
-    slow_values: list[int],
+    fast_values: list[int] | None = None,
+    slow_values: list[int] | None = None,
     n_splits: int = 3,
     train_ratio: float = 0.7,
     bar_minutes: int = 5,
@@ -192,14 +205,27 @@ def run_optimize(
     atr_period: int = 14,
     stop_atr: float = 0.0,
     tp_atr: float = 0.0,
+    lookback_values: list[int] | None = None,
+    entry_z_values: list[float] | None = None,
+    exit_z_values: list[float] | None = None,
+    er_threshold_values: list[float] | None = None,
 ) -> dict:
     """Walk-forward grid optimization over stored ticks. Returns strict-JSON-safe dict."""
     # Build the signal param grid from the selected strategy's keys.
     # MA: {"fast": ..., "slow": ...}  (UNCHANGED — existing tests assert exactly this)
     # Trend: {"fast": ..., "slow": ..., "trend": ...}
-    grid: dict[str, list[int]] = {"fast": fast_values, "slow": slow_values}
-    if strategy == "trend":
-        grid["trend"] = trend_values or []
+    # Meanrev: {"lookback": ..., "entry_z": ..., "exit_z": ..., "er_threshold": ...}
+    if strategy == "meanrev":
+        grid: dict = {
+            "lookback": lookback_values or [],
+            "entry_z": entry_z_values or [],
+            "exit_z": exit_z_values or [],
+            "er_threshold": er_threshold_values or [],
+        }
+    else:
+        grid = {"fast": fast_values, "slow": slow_values}
+        if strategy == "trend":
+            grid["trend"] = trend_values or []
 
     # Fixed (non-gridded) params shared across all run_fn calls.
     base_params: dict = {
@@ -314,8 +340,12 @@ def backtest(
     config: str = typer.Option(None, "--config", help="YAML run config (supersedes the flags above)"),
     json_out: str = typer.Option(None, "--json", help="Write results.json to this path"),
     html_out: str = typer.Option(None, "--html", help="Write an HTML report to this path"),
-    strategy: str = typer.Option("ma", help="ma | trend"),
+    strategy: str = typer.Option("ma", help="ma | trend | meanrev"),
     trend: int = typer.Option(200, help="Trend-filter MA window (trend strategy)"),
+    lookback: int = typer.Option(20, help="Z/ER window (meanrev)"),
+    entry_z: float = typer.Option(2.0, "--entry-z", help="Entry z-threshold (meanrev)"),
+    exit_z: float = typer.Option(0.5, "--exit-z", help="Exit z-threshold (meanrev)"),
+    er_threshold: float = typer.Option(0.3, "--er-threshold", help="Max efficiency ratio to fade (meanrev)"),
     exit_: str = typer.Option("none", "--exit", help="none | fixed | atr"),
     stop_pips: float = typer.Option(0.0, help="Stop in pips (exit=fixed)"),
     tp_pips: float = typer.Option(0.0, help="Take-profit in pips (exit=fixed)"),
@@ -324,8 +354,26 @@ def backtest(
     tp_atr: float = typer.Option(0.0, help="TP = mult x ATR (exit=atr)"),
 ) -> None:
     """Backtest a strategy over stored ticks."""
-    if strategy not in ("ma", "trend"):
-        raise typer.BadParameter("strategy must be ma | trend")
+    if strategy not in ("ma", "trend", "meanrev"):
+        raise typer.BadParameter("strategy must be ma | trend | meanrev")
+    if strategy == "meanrev":
+        if not (symbol and start and end):
+            raise typer.BadParameter("meanrev strategy needs --symbol/--start/--end")
+        result, metrics = run_backtest(
+            symbol=symbol, start=_parse_day(start), end=_parse_day(end), data_dir=data_dir,
+            size=size, bar_minutes=bar_minutes, strategy_name="meanrev",
+            lookback=lookback, entry_z=entry_z, exit_z=exit_z, er_threshold=er_threshold,
+            exit_kind=exit_, stop_pips=stop_pips, tp_pips=tp_pips,
+            atr_period=atr_period, stop_atr=stop_atr, tp_atr=tp_atr,
+            daily_loss_limit=daily_loss_limit or float("inf"),
+            max_position=max_position or float("inf"),
+        )
+        typer.echo(f"symbol={symbol}  bars={bar_minutes}m  meanrev(lookback={lookback} entry_z={entry_z} exit_z={exit_z} er<{er_threshold})  exit={exit_}")
+        typer.echo(f"  trades        : {metrics['num_trades']}")
+        typer.echo(f"  total return  : {metrics['total_return']:.2%}")
+        typer.echo(f"  Sharpe        : {metrics['sharpe']:.2f}")
+        typer.echo(f"  profit factor : {metrics['profit_factor']:.2f}")
+        return
     if strategy == "trend":
         if not (symbol and start and end):
             raise typer.BadParameter("trend strategy needs --symbol/--start/--end")
@@ -382,6 +430,10 @@ def _int_list(value: str) -> list[int]:
     return [int(x) for x in value.split(",") if x.strip()]
 
 
+def _float_list(value: str) -> list[float]:
+    return [float(x) for x in value.split(",") if x.strip()]
+
+
 @app.command()
 def optimize(
     symbol: str = typer.Option(..., help="Single symbol, e.g. EURUSD"),
@@ -395,7 +447,7 @@ def optimize(
     bar_minutes: int = typer.Option(5, help="Bar interval in minutes"),
     objective: str = typer.Option("sharpe", help="Metric to maximize on train"),
     json_out: str = typer.Option(None, "--json", help="Write optimize results to this path"),
-    strategy: str = typer.Option("ma", help="ma | trend"),
+    strategy: str = typer.Option("ma", help="ma | trend | meanrev"),
     trend: str = typer.Option(None, "--trend", help="Comma-separated trend MA windows (trend strategy)"),
     exit_: str = typer.Option("none", "--exit", help="none | fixed | atr"),
     stop_pips: float = typer.Option(0.0, help="Stop in pips (exit=fixed)"),
@@ -403,6 +455,10 @@ def optimize(
     atr_period: int = typer.Option(14, help="ATR period (exit=atr)"),
     stop_atr: float = typer.Option(0.0, help="Stop = mult x ATR (exit=atr)"),
     tp_atr: float = typer.Option(0.0, help="TP = mult x ATR (exit=atr)"),
+    lookback: str = typer.Option(None, "--lookback", help="Comma-separated lookback windows (meanrev)"),
+    entry_z: str = typer.Option(None, "--entry-z", help="Comma-separated entry z-scores (meanrev)"),
+    exit_z: str = typer.Option(None, "--exit-z", help="Comma-separated exit z-scores (meanrev)"),
+    er_threshold: str = typer.Option(None, "--er-threshold", help="Comma-separated ER thresholds (meanrev)"),
 ) -> None:
     """Walk-forward optimize strategy params over stored ticks."""
     out = run_optimize(
@@ -414,6 +470,10 @@ def optimize(
         exit_kind=exit_,
         stop_pips=stop_pips, tp_pips=tp_pips,
         atr_period=atr_period, stop_atr=stop_atr, tp_atr=tp_atr,
+        lookback_values=_int_list(lookback) if lookback else None,
+        entry_z_values=_float_list(entry_z) if entry_z else None,
+        exit_z_values=_float_list(exit_z) if exit_z else None,
+        er_threshold_values=_float_list(er_threshold) if er_threshold else None,
     )
     typer.echo(f"symbol={symbol}  objective={objective}  folds={len(out['folds'])}")
     for i, fr in enumerate(out["folds"]):
