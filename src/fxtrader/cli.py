@@ -104,6 +104,10 @@ def run_backtest(
     atr_period: int = 0,
     stop_atr: float = 0.0,
     tp_atr: float = 0.0,
+    lookback: int = 0,
+    entry_z: float = 0.0,
+    exit_z: float = 0.0,
+    er_threshold: float = 0.0,
 ):
     """Run a backtest over stored ticks. Returns (BacktestResult, metrics)."""
     store = TickStore(data_dir)
@@ -118,7 +122,10 @@ def run_backtest(
     )
     strategy = make_strategy(
         strategy_name, symbol=symbol,
-        params={"fast": fast, "slow": slow, "trend": trend, "size": size},
+        params={
+            "fast": fast, "slow": slow, "trend": trend, "size": size,
+            "lookback": lookback, "entry_z": entry_z, "exit_z": exit_z, "er_threshold": er_threshold,
+        },
         exit_policy=exit_policy,
     )
     broker = SimulatedBroker(
@@ -314,8 +321,12 @@ def backtest(
     config: str = typer.Option(None, "--config", help="YAML run config (supersedes the flags above)"),
     json_out: str = typer.Option(None, "--json", help="Write results.json to this path"),
     html_out: str = typer.Option(None, "--html", help="Write an HTML report to this path"),
-    strategy: str = typer.Option("ma", help="ma | trend"),
+    strategy: str = typer.Option("ma", help="ma | trend | meanrev"),
     trend: int = typer.Option(200, help="Trend-filter MA window (trend strategy)"),
+    lookback: int = typer.Option(20, help="Z/ER window (meanrev)"),
+    entry_z: float = typer.Option(2.0, "--entry-z", help="Entry z-threshold (meanrev)"),
+    exit_z: float = typer.Option(0.5, "--exit-z", help="Exit z-threshold (meanrev)"),
+    er_threshold: float = typer.Option(0.3, "--er-threshold", help="Max efficiency ratio to fade (meanrev)"),
     exit_: str = typer.Option("none", "--exit", help="none | fixed | atr"),
     stop_pips: float = typer.Option(0.0, help="Stop in pips (exit=fixed)"),
     tp_pips: float = typer.Option(0.0, help="Take-profit in pips (exit=fixed)"),
@@ -324,8 +335,26 @@ def backtest(
     tp_atr: float = typer.Option(0.0, help="TP = mult x ATR (exit=atr)"),
 ) -> None:
     """Backtest a strategy over stored ticks."""
-    if strategy not in ("ma", "trend"):
-        raise typer.BadParameter("strategy must be ma | trend")
+    if strategy not in ("ma", "trend", "meanrev"):
+        raise typer.BadParameter("strategy must be ma | trend | meanrev")
+    if strategy == "meanrev":
+        if not (symbol and start and end):
+            raise typer.BadParameter("meanrev strategy needs --symbol/--start/--end")
+        result, metrics = run_backtest(
+            symbol=symbol, start=_parse_day(start), end=_parse_day(end), data_dir=data_dir,
+            size=size, bar_minutes=bar_minutes, strategy_name="meanrev",
+            lookback=lookback, entry_z=entry_z, exit_z=exit_z, er_threshold=er_threshold,
+            exit_kind=exit_, stop_pips=stop_pips, tp_pips=tp_pips,
+            atr_period=atr_period, stop_atr=stop_atr, tp_atr=tp_atr,
+            daily_loss_limit=daily_loss_limit or float("inf"),
+            max_position=max_position or float("inf"),
+        )
+        typer.echo(f"symbol={symbol}  bars={bar_minutes}m  meanrev(lookback={lookback} entry_z={entry_z} exit_z={exit_z} er<{er_threshold})  exit={exit_}")
+        typer.echo(f"  trades        : {metrics['num_trades']}")
+        typer.echo(f"  total return  : {metrics['total_return']:.2%}")
+        typer.echo(f"  Sharpe        : {metrics['sharpe']:.2f}")
+        typer.echo(f"  profit factor : {metrics['profit_factor']:.2f}")
+        return
     if strategy == "trend":
         if not (symbol and start and end):
             raise typer.BadParameter("trend strategy needs --symbol/--start/--end")
