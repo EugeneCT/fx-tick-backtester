@@ -58,7 +58,23 @@ class MeanReversionFader(Strategy):
 
         position = self.portfolio.position(self.symbol).quantity
 
-        # (Task 3 inserts the stop/TP exit check HERE, before the signal exit.)
+        # stop/TP overlay (risk-first), bar-granular, stop-first same-bar rule
+        if position != 0 and self._entry_price is not None:
+            entry = self._entry_price
+            reason = None
+            if position > 0:  # long
+                if self._stop_dist is not None and bar.low <= entry - self._stop_dist:
+                    reason = "stop"
+                elif self._tp_dist is not None and bar.high >= entry + self._tp_dist:
+                    reason = "tp"
+            else:  # short
+                if self._stop_dist is not None and bar.high >= entry + self._stop_dist:
+                    reason = "stop"
+                elif self._tp_dist is not None and bar.low <= entry - self._tp_dist:
+                    reason = "tp"
+            if reason:
+                self._flatten(position, reason)
+                return
 
         # signal exit: reverted to the mean
         if position != 0 and abs(z) <= self.exit_z:

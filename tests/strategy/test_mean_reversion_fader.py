@@ -83,3 +83,20 @@ def test_ignores_other_symbols():
     s = MeanReversionFader("EURUSD", lookback=5, entry_z=1.0, exit_z=0.3, er_threshold=0.9, size=10_000)
     _pf, orders = _drive(s, [1.0, 1.001, 1.0, 1.001, 1.0, 1.001, 1.004], symbol="GBPUSD")
     assert orders == []
+
+
+def test_stop_hit_flattens_and_disarms():
+    # Entry: SHORT at bar-6 close=1.0040 (ranging+spike, er<0.9, z>1.0).
+    # stop_dist = 20 * 0.0001 = 0.0020 -> short stop level = 1.0040 + 0.0020 = 1.0060
+    # tp_dist   = 500 * 0.0001 = 0.0500 -> short tp level  = 1.0040 - 0.0500 = 0.9540
+    # Trigger bar (bar-7): high=1.0065 > 1.0060 (stop hit), low=1.0045 (far from TP at 0.9540)
+    s = MeanReversionFader(
+        "EURUSD", lookback=5, entry_z=1.0, exit_z=0.3, er_threshold=0.9, size=10_000,
+        exit_policy=FixedPips(stop_pips=20, tp_pips=500, pip_size=0.0001),
+    )
+    closes = [1.0000, 1.0010, 1.0000, 1.0010, 1.0000, 1.0010, 1.0040, 1.0045]
+    highs  = [None] * 7 + [1.0065]   # bar-7 high breaches short stop at 1.0060
+    lows   = [None] * 7 + [1.0045]   # bar-7 low does not approach TP at 0.9540
+    pf, _ = _drive(s, closes, highs=highs, lows=lows)
+    assert pf.position("EURUSD").quantity == 0
+    assert s._last_exit_reason == "stop"
