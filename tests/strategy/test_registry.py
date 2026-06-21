@@ -1,9 +1,10 @@
 import pytest
 
 from fxtrader.strategy.examples.ma_crossover import MaCrossover
+from fxtrader.strategy.examples.mean_reversion_fader import MeanReversionFader
 from fxtrader.strategy.examples.trend_filtered_crossover import TrendFilteredCrossover
 from fxtrader.strategy.exits import AtrMultiple, FixedPips, NoExit
-from fxtrader.strategy.registry import make_exit_policy, make_strategy
+from fxtrader.strategy.registry import STRATEGY_PARAMS, make_exit_policy, make_strategy
 
 
 def test_make_strategy_ma():
@@ -34,3 +35,16 @@ def test_make_exit_policy_variants():
         AtrMultiple)
     with pytest.raises(ValueError):
         make_exit_policy("bad", params={}, symbol="EURUSD")
+
+
+def test_make_strategy_meanrev():
+    s = make_strategy(
+        "meanrev", symbol="EURUSD",
+        params={"lookback": 20, "entry_z": 2.0, "exit_z": 0.5, "er_threshold": 0.3, "size": 10_000},
+        exit_policy=FixedPips(10, 20, 0.0001),
+    )
+    assert isinstance(s, MeanReversionFader)
+
+
+def test_strategy_params_has_meanrev():
+    assert STRATEGY_PARAMS["meanrev"] == ("lookback", "entry_z", "exit_z", "er_threshold")
