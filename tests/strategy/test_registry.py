@@ -3,6 +3,7 @@ import pytest
 from fxtrader.strategy.examples.ma_crossover import MaCrossover
 from fxtrader.strategy.examples.mean_reversion_fader import MeanReversionFader
 from fxtrader.strategy.examples.opening_range_breakout import OpeningRangeBreakout
+from fxtrader.strategy.examples.pairs_spread_reversion import PairsSpreadReversion
 from fxtrader.strategy.examples.trend_filtered_crossover import TrendFilteredCrossover
 from fxtrader.strategy.exits import AtrMultiple, FixedPips, NoExit
 from fxtrader.strategy.registry import STRATEGY_PARAMS, make_exit_policy, make_strategy
@@ -63,3 +64,15 @@ def test_make_strategy_orb():
 
 def test_strategy_params_has_orb():
     assert STRATEGY_PARAMS["orb"] == ("range_start_hour", "range_end_hour", "entry_end_hour", "exit_hour")
+
+
+def test_make_strategy_xpair():
+    s = make_strategy(
+        "xpair", symbol="EURUSD", symbol2="GBPUSD",
+        params={"lookback": 20, "entry_z": 2.0, "exit_z": 0.5, "stop_z": 4.0, "size": 10_000},
+    )
+    assert isinstance(s, PairsSpreadReversion)
+
+
+def test_strategy_params_has_xpair():
+    assert STRATEGY_PARAMS["xpair"] == ("lookback", "entry_z", "exit_z", "stop_z")
