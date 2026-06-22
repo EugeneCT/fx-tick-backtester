@@ -112,10 +112,12 @@ def run_backtest(
     range_end_hour: int = 0,
     entry_end_hour: int = 0,
     exit_hour: int = 0,
+    symbol2: str | None = None,
+    stop_z: float = 0.0,
 ):
     """Run a backtest over stored ticks. Returns (BacktestResult, metrics)."""
     store = TickStore(data_dir)
-    feed = HistoricalTickFeed(store, [symbol], start, end)
+    feed = HistoricalTickFeed(store, [symbol] + ([symbol2] if symbol2 else []), start, end)
     exit_policy = make_exit_policy(
         exit_kind,
         params={
@@ -125,12 +127,13 @@ def run_backtest(
         symbol=symbol,
     )
     strategy = make_strategy(
-        strategy_name, symbol=symbol,
+        strategy_name, symbol=symbol, symbol2=symbol2,
         params={
             "fast": fast, "slow": slow, "trend": trend, "size": size,
             "lookback": lookback, "entry_z": entry_z, "exit_z": exit_z, "er_threshold": er_threshold,
             "range_start_hour": range_start_hour, "range_end_hour": range_end_hour,
             "entry_end_hour": entry_end_hour, "exit_hour": exit_hour,
+            "stop_z": stop_z,
         },
         exit_policy=exit_policy,
     )
@@ -378,10 +381,28 @@ def backtest(
     atr_period: int = typer.Option(14, help="ATR period (exit=atr)"),
     stop_atr: float = typer.Option(0.0, help="Stop = mult x ATR (exit=atr)"),
     tp_atr: float = typer.Option(0.0, help="TP = mult x ATR (exit=atr)"),
+    symbol2: str = typer.Option(None, "--symbol2", help="Second leg symbol (xpair)"),
+    stop_z: float = typer.Option(4.0, "--stop-z", help="Divergence stop z (xpair)"),
 ) -> None:
     """Backtest a strategy over stored ticks."""
-    if strategy not in ("ma", "trend", "meanrev", "orb"):
-        raise typer.BadParameter("strategy must be ma | trend | meanrev | orb")
+    if strategy not in ("ma", "trend", "meanrev", "orb", "xpair"):
+        raise typer.BadParameter("strategy must be ma | trend | meanrev | orb | xpair")
+    if strategy == "xpair":
+        if not (symbol and symbol2 and start and end):
+            raise typer.BadParameter("xpair needs --symbol/--symbol2/--start/--end")
+        result, metrics = run_backtest(
+            symbol=symbol, symbol2=symbol2, start=_parse_day(start), end=_parse_day(end),
+            data_dir=data_dir, size=size, bar_minutes=bar_minutes, strategy_name="xpair",
+            lookback=lookback, entry_z=entry_z, exit_z=exit_z, stop_z=stop_z, exit_kind="none",
+            daily_loss_limit=daily_loss_limit or float("inf"),
+            max_position=max_position or float("inf"),
+        )
+        typer.echo(f"symbol={symbol}/{symbol2}  bars={bar_minutes}m  xpair(lookback={lookback} entry_z={entry_z} exit_z={exit_z} stop_z={stop_z})")
+        typer.echo(f"  trades        : {metrics['num_trades']}")
+        typer.echo(f"  total return  : {metrics['total_return']:.2%}")
+        typer.echo(f"  Sharpe        : {metrics['sharpe']:.2f}")
+        typer.echo(f"  profit factor : {metrics['profit_factor']:.2f}")
+        return
     if strategy == "orb":
         if not (symbol and start and end):
             raise typer.BadParameter("orb strategy needs --symbol/--start/--end")
