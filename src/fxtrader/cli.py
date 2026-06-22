@@ -108,6 +108,10 @@ def run_backtest(
     entry_z: float = 0.0,
     exit_z: float = 0.0,
     er_threshold: float = 0.0,
+    range_start_hour: int = 0,
+    range_end_hour: int = 0,
+    entry_end_hour: int = 0,
+    exit_hour: int = 0,
 ):
     """Run a backtest over stored ticks. Returns (BacktestResult, metrics)."""
     store = TickStore(data_dir)
@@ -125,6 +129,8 @@ def run_backtest(
         params={
             "fast": fast, "slow": slow, "trend": trend, "size": size,
             "lookback": lookback, "entry_z": entry_z, "exit_z": exit_z, "er_threshold": er_threshold,
+            "range_start_hour": range_start_hour, "range_end_hour": range_end_hour,
+            "entry_end_hour": entry_end_hour, "exit_hour": exit_hour,
         },
         exit_policy=exit_policy,
     )
@@ -168,6 +174,9 @@ def _strategy_run_fn(
         elif strategy_name == "meanrev":
             if not (p["lookback"] >= 2 and 0 <= p["exit_z"] < p["entry_z"] and 0 < p["er_threshold"] <= 1):
                 return None
+        elif strategy_name == "orb":
+            if not (0 <= p["range_start_hour"] < p["range_end_hour"] <= p["entry_end_hour"] < p["exit_hour"] < 24):
+                return None
         _result, metrics = run_backtest(
             symbol=symbol, start=start, end=end, data_dir=data_dir,
             fast=p.get("fast", 20), slow=p.get("slow", 50), size=p.get("size", 10_000),
@@ -178,6 +187,8 @@ def _strategy_run_fn(
             tp_atr=p.get("tp_atr", 0.0),
             lookback=p.get("lookback", 0), entry_z=p.get("entry_z", 0.0),
             exit_z=p.get("exit_z", 0.0), er_threshold=p.get("er_threshold", 0.0),
+            range_start_hour=p.get("range_start_hour", 0), range_end_hour=p.get("range_end_hour", 0),
+            entry_end_hour=p.get("entry_end_hour", 0), exit_hour=p.get("exit_hour", 0),
         )
         return metrics
 
@@ -209,14 +220,25 @@ def run_optimize(
     entry_z_values: list[float] | None = None,
     exit_z_values: list[float] | None = None,
     er_threshold_values: list[float] | None = None,
+    range_start_values: list[int] | None = None,
+    range_end_values: list[int] | None = None,
+    entry_end_values: list[int] | None = None,
+    exit_hour_values: list[int] | None = None,
 ) -> dict:
     """Walk-forward grid optimization over stored ticks. Returns strict-JSON-safe dict."""
     # Build the signal param grid from the selected strategy's keys.
     # MA: {"fast": ..., "slow": ...}  (UNCHANGED — existing tests assert exactly this)
     # Trend: {"fast": ..., "slow": ..., "trend": ...}
     # Meanrev: {"lookback": ..., "entry_z": ..., "exit_z": ..., "er_threshold": ...}
-    if strategy == "meanrev":
+    if strategy == "orb":
         grid: dict = {
+            "range_start_hour": range_start_values or [],
+            "range_end_hour": range_end_values or [],
+            "entry_end_hour": entry_end_values or [],
+            "exit_hour": exit_hour_values or [],
+        }
+    elif strategy == "meanrev":
+        grid = {
             "lookback": lookback_values or [],
             "entry_z": entry_z_values or [],
             "exit_z": exit_z_values or [],
@@ -340,12 +362,16 @@ def backtest(
     config: str = typer.Option(None, "--config", help="YAML run config (supersedes the flags above)"),
     json_out: str = typer.Option(None, "--json", help="Write results.json to this path"),
     html_out: str = typer.Option(None, "--html", help="Write an HTML report to this path"),
-    strategy: str = typer.Option("ma", help="ma | trend | meanrev"),
+    strategy: str = typer.Option("ma", help="ma | trend | meanrev | orb"),
     trend: int = typer.Option(200, help="Trend-filter MA window (trend strategy)"),
     lookback: int = typer.Option(20, help="Z/ER window (meanrev)"),
     entry_z: float = typer.Option(2.0, "--entry-z", help="Entry z-threshold (meanrev)"),
     exit_z: float = typer.Option(0.5, "--exit-z", help="Exit z-threshold (meanrev)"),
     er_threshold: float = typer.Option(0.3, "--er-threshold", help="Max efficiency ratio to fade (meanrev)"),
+    range_start: int = typer.Option(0, "--range-start", help="Range-build start hour UTC (orb)"),
+    range_end: int = typer.Option(7, "--range-end", help="Range-build end / entry start hour UTC (orb)"),
+    entry_end: int = typer.Option(16, "--entry-end", help="Stop taking entries after this hour UTC (orb)"),
+    exit_hour: int = typer.Option(21, "--exit-hour", help="Flatten-all hour UTC (orb)"),
     exit_: str = typer.Option("none", "--exit", help="none | fixed | atr"),
     stop_pips: float = typer.Option(0.0, help="Stop in pips (exit=fixed)"),
     tp_pips: float = typer.Option(0.0, help="Take-profit in pips (exit=fixed)"),
@@ -354,8 +380,27 @@ def backtest(
     tp_atr: float = typer.Option(0.0, help="TP = mult x ATR (exit=atr)"),
 ) -> None:
     """Backtest a strategy over stored ticks."""
-    if strategy not in ("ma", "trend", "meanrev"):
-        raise typer.BadParameter("strategy must be ma | trend | meanrev")
+    if strategy not in ("ma", "trend", "meanrev", "orb"):
+        raise typer.BadParameter("strategy must be ma | trend | meanrev | orb")
+    if strategy == "orb":
+        if not (symbol and start and end):
+            raise typer.BadParameter("orb strategy needs --symbol/--start/--end")
+        result, metrics = run_backtest(
+            symbol=symbol, start=_parse_day(start), end=_parse_day(end), data_dir=data_dir,
+            size=size, bar_minutes=bar_minutes, strategy_name="orb",
+            range_start_hour=range_start, range_end_hour=range_end,
+            entry_end_hour=entry_end, exit_hour=exit_hour,
+            exit_kind=exit_, stop_pips=stop_pips, tp_pips=tp_pips,
+            atr_period=atr_period, stop_atr=stop_atr, tp_atr=tp_atr,
+            daily_loss_limit=daily_loss_limit or float("inf"),
+            max_position=max_position or float("inf"),
+        )
+        typer.echo(f"symbol={symbol}  bars={bar_minutes}m  orb(range={range_start}-{range_end} entry<{entry_end} exit@{exit_hour})  exit={exit_}")
+        typer.echo(f"  trades        : {metrics['num_trades']}")
+        typer.echo(f"  total return  : {metrics['total_return']:.2%}")
+        typer.echo(f"  Sharpe        : {metrics['sharpe']:.2f}")
+        typer.echo(f"  profit factor : {metrics['profit_factor']:.2f}")
+        return
     if strategy == "meanrev":
         if not (symbol and start and end):
             raise typer.BadParameter("meanrev strategy needs --symbol/--start/--end")
@@ -447,7 +492,7 @@ def optimize(
     bar_minutes: int = typer.Option(5, help="Bar interval in minutes"),
     objective: str = typer.Option("sharpe", help="Metric to maximize on train"),
     json_out: str = typer.Option(None, "--json", help="Write optimize results to this path"),
-    strategy: str = typer.Option("ma", help="ma | trend | meanrev"),
+    strategy: str = typer.Option("ma", help="ma | trend | meanrev | orb"),
     trend: str = typer.Option(None, "--trend", help="Comma-separated trend MA windows (trend strategy)"),
     exit_: str = typer.Option("none", "--exit", help="none | fixed | atr"),
     stop_pips: float = typer.Option(0.0, help="Stop in pips (exit=fixed)"),
@@ -459,6 +504,10 @@ def optimize(
     entry_z: str = typer.Option(None, "--entry-z", help="Comma-separated entry z-scores (meanrev)"),
     exit_z: str = typer.Option(None, "--exit-z", help="Comma-separated exit z-scores (meanrev)"),
     er_threshold: str = typer.Option(None, "--er-threshold", help="Comma-separated ER thresholds (meanrev)"),
+    range_start: str = typer.Option(None, "--range-start", help="Comma range-start hours (orb)"),
+    range_end: str = typer.Option(None, "--range-end", help="Comma range-end hours (orb)"),
+    entry_end: str = typer.Option(None, "--entry-end", help="Comma entry-end hours (orb)"),
+    exit_hour: str = typer.Option(None, "--exit-hour", help="Comma exit hours (orb)"),
 ) -> None:
     """Walk-forward optimize strategy params over stored ticks."""
     out = run_optimize(
@@ -474,6 +523,10 @@ def optimize(
         entry_z_values=_float_list(entry_z) if entry_z else None,
         exit_z_values=_float_list(exit_z) if exit_z else None,
         er_threshold_values=_float_list(er_threshold) if er_threshold else None,
+        range_start_values=_int_list(range_start) if range_start else None,
+        range_end_values=_int_list(range_end) if range_end else None,
+        entry_end_values=_int_list(entry_end) if entry_end else None,
+        exit_hour_values=_int_list(exit_hour) if exit_hour else None,
     )
     typer.echo(f"symbol={symbol}  objective={objective}  folds={len(out['folds'])}")
     for i, fr in enumerate(out["folds"]):
