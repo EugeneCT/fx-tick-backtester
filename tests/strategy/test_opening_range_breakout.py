@@ -6,6 +6,7 @@ from fxtrader.core.clock import SimClock
 from fxtrader.core.portfolio import Portfolio
 from fxtrader.core.types import Bar, Fill, Order
 from fxtrader.strategy.examples.opening_range_breakout import OpeningRangeBreakout
+from fxtrader.strategy.exits import FixedPips
 
 
 def _bar(hour, o, hi, lo, c, *, day=2, symbol="EURUSD"):
@@ -109,6 +110,17 @@ def test_day_rollover_resets_and_allows_new_entry():
     # day1: entry + time-exit (2 orders); day2: a fresh entry (1 more)
     assert len(orders) == 3
     assert pf.position("EURUSD").quantity > 0
+
+
+def test_stop_hit_flattens_before_time_exit():
+    s = _orb(exit_policy=FixedPips(stop_pips=20, tp_pips=500, pip_size=0.0001))  # stop 0.0020
+    bars = [_bar(h, 1.10, 1.1010, 1.0990, 1.10) for h in range(0, 7)]
+    bars.append(_bar(8, 1.10, 1.1030, 1.10, 1.1025))   # LONG entry at 1.1025
+    # next bar dips: low 1.1000 <= entry(1.1025) - 0.0020 = 1.1005 -> stop; high far from TP
+    bars.append(_bar(9, 1.1025, 1.1026, 1.1000, 1.1010))
+    pf, _ = _drive_bars(s, bars)
+    assert pf.position("EURUSD").quantity == 0
+    assert s._last_exit_reason == "stop"
 
 
 def test_ignores_other_symbols():
