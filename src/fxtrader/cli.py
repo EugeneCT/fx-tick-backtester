@@ -165,6 +165,7 @@ def _strategy_run_fn(
     bar_minutes: int,
     base_params: dict,
     exit_kind: str,
+    symbol2: str | None = None,
 ):
     """Build a run_fn(params, start, end) -> metrics for any strategy grid (None on invalid params)."""
     def run_fn(params: dict, start: datetime, end: datetime):
@@ -180,19 +181,27 @@ def _strategy_run_fn(
         elif strategy_name == "orb":
             if not (0 <= p["range_start_hour"] < p["range_end_hour"] <= p["entry_end_hour"] < p["exit_hour"] < 24):
                 return None
-        _result, metrics = run_backtest(
-            symbol=symbol, start=start, end=end, data_dir=data_dir,
-            fast=p.get("fast", 20), slow=p.get("slow", 50), size=p.get("size", 10_000),
-            bar_minutes=bar_minutes, strategy_name=strategy_name,
-            trend=p.get("trend", 0), exit_kind=exit_kind,
-            stop_pips=p.get("stop_pips", 0.0), tp_pips=p.get("tp_pips", 0.0),
-            atr_period=p.get("atr_period", 14), stop_atr=p.get("stop_atr", 0.0),
-            tp_atr=p.get("tp_atr", 0.0),
-            lookback=p.get("lookback", 0), entry_z=p.get("entry_z", 0.0),
-            exit_z=p.get("exit_z", 0.0), er_threshold=p.get("er_threshold", 0.0),
-            range_start_hour=p.get("range_start_hour", 0), range_end_hour=p.get("range_end_hour", 0),
-            entry_end_hour=p.get("entry_end_hour", 0), exit_hour=p.get("exit_hour", 0),
-        )
+        elif strategy_name == "xpair":
+            if not (p["lookback"] >= 2 and 0 <= p["exit_z"] < p["entry_z"] < p["stop_z"]):
+                return None
+        try:
+            _result, metrics = run_backtest(
+                symbol=symbol, symbol2=symbol2, start=start, end=end, data_dir=data_dir,
+                fast=p.get("fast", 20), slow=p.get("slow", 50), size=p.get("size", 10_000),
+                bar_minutes=bar_minutes, strategy_name=strategy_name,
+                trend=p.get("trend", 0), exit_kind=exit_kind,
+                stop_pips=p.get("stop_pips", 0.0), tp_pips=p.get("tp_pips", 0.0),
+                atr_period=p.get("atr_period", 14), stop_atr=p.get("stop_atr", 0.0),
+                tp_atr=p.get("tp_atr", 0.0),
+                lookback=p.get("lookback", 0), entry_z=p.get("entry_z", 0.0),
+                exit_z=p.get("exit_z", 0.0), er_threshold=p.get("er_threshold", 0.0),
+                range_start_hour=p.get("range_start_hour", 0), range_end_hour=p.get("range_end_hour", 0),
+                entry_end_hour=p.get("entry_end_hour", 0), exit_hour=p.get("exit_hour", 0),
+                stop_z=p.get("stop_z", 0.0),
+            )
+        except RuntimeError:
+            # No ticks in this window (empty fold): skip.
+            return None
         return metrics
 
     return run_fn
@@ -227,14 +236,24 @@ def run_optimize(
     range_end_values: list[int] | None = None,
     entry_end_values: list[int] | None = None,
     exit_hour_values: list[int] | None = None,
+    symbol2: str | None = None,
+    stop_z_values: list[float] | None = None,
 ) -> dict:
     """Walk-forward grid optimization over stored ticks. Returns strict-JSON-safe dict."""
     # Build the signal param grid from the selected strategy's keys.
     # MA: {"fast": ..., "slow": ...}  (UNCHANGED — existing tests assert exactly this)
     # Trend: {"fast": ..., "slow": ..., "trend": ...}
     # Meanrev: {"lookback": ..., "entry_z": ..., "exit_z": ..., "er_threshold": ...}
-    if strategy == "orb":
+    # XPair: {"lookback": ..., "entry_z": ..., "exit_z": ..., "stop_z": ...}
+    if strategy == "xpair":
         grid: dict = {
+            "lookback": lookback_values or [],
+            "entry_z": entry_z_values or [],
+            "exit_z": exit_z_values or [],
+            "stop_z": stop_z_values or [],
+        }
+    elif strategy == "orb":
+        grid = {
             "range_start_hour": range_start_values or [],
             "range_end_hour": range_end_values or [],
             "entry_end_hour": entry_end_values or [],
@@ -262,7 +281,7 @@ def run_optimize(
         "tp_atr": tp_atr,
     }
 
-    run_fn = _strategy_run_fn(strategy, symbol, data_dir, bar_minutes, base_params, exit_kind)
+    run_fn = _strategy_run_fn(strategy, symbol, data_dir, bar_minutes, base_params, exit_kind, symbol2=symbol2)
     out = walk_forward_optimize(
         run_fn, start, end, grid,
         n_splits=n_splits, train_ratio=train_ratio, objective=objective,
@@ -513,7 +532,7 @@ def optimize(
     bar_minutes: int = typer.Option(5, help="Bar interval in minutes"),
     objective: str = typer.Option("sharpe", help="Metric to maximize on train"),
     json_out: str = typer.Option(None, "--json", help="Write optimize results to this path"),
-    strategy: str = typer.Option("ma", help="ma | trend | meanrev | orb"),
+    strategy: str = typer.Option("ma", help="ma | trend | meanrev | orb | xpair"),
     trend: str = typer.Option(None, "--trend", help="Comma-separated trend MA windows (trend strategy)"),
     exit_: str = typer.Option("none", "--exit", help="none | fixed | atr"),
     stop_pips: float = typer.Option(0.0, help="Stop in pips (exit=fixed)"),
@@ -521,14 +540,16 @@ def optimize(
     atr_period: int = typer.Option(14, help="ATR period (exit=atr)"),
     stop_atr: float = typer.Option(0.0, help="Stop = mult x ATR (exit=atr)"),
     tp_atr: float = typer.Option(0.0, help="TP = mult x ATR (exit=atr)"),
-    lookback: str = typer.Option(None, "--lookback", help="Comma-separated lookback windows (meanrev)"),
-    entry_z: str = typer.Option(None, "--entry-z", help="Comma-separated entry z-scores (meanrev)"),
-    exit_z: str = typer.Option(None, "--exit-z", help="Comma-separated exit z-scores (meanrev)"),
+    lookback: str = typer.Option(None, "--lookback", help="Comma-separated lookback windows (meanrev/xpair)"),
+    entry_z: str = typer.Option(None, "--entry-z", help="Comma-separated entry z-scores (meanrev/xpair)"),
+    exit_z: str = typer.Option(None, "--exit-z", help="Comma-separated exit z-scores (meanrev/xpair)"),
     er_threshold: str = typer.Option(None, "--er-threshold", help="Comma-separated ER thresholds (meanrev)"),
     range_start: str = typer.Option(None, "--range-start", help="Comma range-start hours (orb)"),
     range_end: str = typer.Option(None, "--range-end", help="Comma range-end hours (orb)"),
     entry_end: str = typer.Option(None, "--entry-end", help="Comma entry-end hours (orb)"),
     exit_hour: str = typer.Option(None, "--exit-hour", help="Comma exit hours (orb)"),
+    symbol2: str = typer.Option(None, "--symbol2", help="Second leg symbol (xpair)"),
+    stop_z: str = typer.Option(None, "--stop-z", help="Comma divergence-stop z (xpair)"),
 ) -> None:
     """Walk-forward optimize strategy params over stored ticks."""
     out = run_optimize(
@@ -548,6 +569,8 @@ def optimize(
         range_end_values=_int_list(range_end) if range_end else None,
         entry_end_values=_int_list(entry_end) if entry_end else None,
         exit_hour_values=_int_list(exit_hour) if exit_hour else None,
+        symbol2=symbol2,
+        stop_z_values=_float_list(stop_z) if stop_z else None,
     )
     typer.echo(f"symbol={symbol}  objective={objective}  folds={len(out['folds'])}")
     for i, fr in enumerate(out["folds"]):
