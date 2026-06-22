@@ -184,24 +184,20 @@ def _strategy_run_fn(
         elif strategy_name == "xpair":
             if not (p["lookback"] >= 2 and 0 <= p["exit_z"] < p["entry_z"] < p["stop_z"]):
                 return None
-        try:
-            _result, metrics = run_backtest(
-                symbol=symbol, symbol2=symbol2, start=start, end=end, data_dir=data_dir,
-                fast=p.get("fast", 20), slow=p.get("slow", 50), size=p.get("size", 10_000),
-                bar_minutes=bar_minutes, strategy_name=strategy_name,
-                trend=p.get("trend", 0), exit_kind=exit_kind,
-                stop_pips=p.get("stop_pips", 0.0), tp_pips=p.get("tp_pips", 0.0),
-                atr_period=p.get("atr_period", 14), stop_atr=p.get("stop_atr", 0.0),
-                tp_atr=p.get("tp_atr", 0.0),
-                lookback=p.get("lookback", 0), entry_z=p.get("entry_z", 0.0),
-                exit_z=p.get("exit_z", 0.0), er_threshold=p.get("er_threshold", 0.0),
-                range_start_hour=p.get("range_start_hour", 0), range_end_hour=p.get("range_end_hour", 0),
-                entry_end_hour=p.get("entry_end_hour", 0), exit_hour=p.get("exit_hour", 0),
-                stop_z=p.get("stop_z", 0.0),
-            )
-        except RuntimeError:
-            # No ticks in this window (empty fold): skip.
-            return None
+        _result, metrics = run_backtest(
+            symbol=symbol, symbol2=symbol2, start=start, end=end, data_dir=data_dir,
+            fast=p.get("fast", 20), slow=p.get("slow", 50), size=p.get("size", 10_000),
+            bar_minutes=bar_minutes, strategy_name=strategy_name,
+            trend=p.get("trend", 0), exit_kind=exit_kind,
+            stop_pips=p.get("stop_pips", 0.0), tp_pips=p.get("tp_pips", 0.0),
+            atr_period=p.get("atr_period", 14), stop_atr=p.get("stop_atr", 0.0),
+            tp_atr=p.get("tp_atr", 0.0),
+            lookback=p.get("lookback", 0), entry_z=p.get("entry_z", 0.0),
+            exit_z=p.get("exit_z", 0.0), er_threshold=p.get("er_threshold", 0.0),
+            range_start_hour=p.get("range_start_hour", 0), range_end_hour=p.get("range_end_hour", 0),
+            entry_end_hour=p.get("entry_end_hour", 0), exit_hour=p.get("exit_hour", 0),
+            stop_z=p.get("stop_z", 0.0),
+        )
         return metrics
 
     return run_fn

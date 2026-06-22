@@ -24,7 +24,7 @@ def _seed(tmp_path, n=2000):
 
 
 def test_optimize_xpair_param_grid(tmp_path):
-    _seed(tmp_path, n=4000)
+    _seed(tmp_path, n=5760)
     out = run_optimize(
         symbol="EURUSD", symbol2="GBPUSD",
         start=datetime(2024, 1, 2, tzinfo=timezone.utc),
@@ -40,7 +40,7 @@ def test_optimize_xpair_param_grid(tmp_path):
 
 
 def test_optimize_orb_grid_still_works(tmp_path):
-    _seed(tmp_path, n=4000)
+    _seed(tmp_path, n=5760)
     out = run_optimize(
         symbol="EURUSD",
         start=datetime(2024, 1, 2, tzinfo=timezone.utc),
