@@ -58,6 +58,10 @@ class MeanReversionFader(Strategy):
 
         position = self.portfolio.position(self.symbol).quantity
 
+        # NOTE: the stop/TP ExitPolicy overlay is effectively a DEAD PATH for this strategy —
+        # the signal exit (|z| <= exit_z) fires the bar after entry and pre-empts the brackets
+        # every time (verified empirically: research/findings-2026-06-21.md). Tuning stop/TP here
+        # cannot change behavior; the no-exit baseline is the strategy's ceiling.
         # stop/TP overlay (risk-first), bar-granular, stop-first same-bar rule
         if position != 0 and self._entry_price is not None:
             entry = self._entry_price

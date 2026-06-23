@@ -170,6 +170,7 @@ tests/ (cli meanrev tests)               NEW/EDIT backtest+optimize end-to-end
   coarse bars, tiny grids; the feed refactor remains a separate concern.
 - **CLI accretion:** three strategies now share accreted flags; generalizing the param plumbing is a
   deliberately deferred, separate cycle.
+- **Inert stop/TP overlay:** empirically, the stop/TP overlay is inert for this strategy — the z-signal exit pre-empts the brackets every bar (`research/findings-2026-06-21.md`).
 
 ## 10. Definition of done
 
