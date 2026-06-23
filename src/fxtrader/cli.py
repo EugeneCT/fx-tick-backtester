@@ -548,6 +548,8 @@ def optimize(
     stop_z: str = typer.Option(None, "--stop-z", help="Comma divergence-stop z (xpair)"),
 ) -> None:
     """Walk-forward optimize strategy params over stored ticks."""
+    if strategy not in ("ma", "trend", "meanrev", "orb", "xpair"):
+        raise typer.BadParameter("strategy must be ma | trend | meanrev | orb | xpair")
     out = run_optimize(
         symbol=symbol, start=_parse_day(start), end=_parse_day(end), data_dir=data_dir,
         fast_values=_int_list(fast), slow_values=_int_list(slow),

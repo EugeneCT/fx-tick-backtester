@@ -63,14 +63,20 @@ class TickStore:
         self._update_manifest(symbol)
 
     def read_ticks(self, symbol: str, start: datetime, end: datetime) -> pl.DataFrame:
+        from fxtrader.data.calendar import iter_months
+
         symbol_dir = self.root / symbol
         if not symbol_dir.exists():
             return _EMPTY.clone()
-        files = sorted(symbol_dir.glob("*/*.parquet"))
-        if not files:
+        paths = []
+        for _ym, m_start, _m_end in iter_months(start, end):
+            path = self._month_path(symbol, m_start.year, m_start.month)
+            if path.exists():
+                paths.append(path)
+        if not paths:
             return _EMPTY.clone()
         return (
-            pl.read_parquet(files)
+            pl.read_parquet(paths)
             .filter((pl.col("ts") >= start) & (pl.col("ts") < end))
             .sort("ts")
         )

@@ -1,9 +1,13 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from fxtrader.cli import run_optimize
+from typer.testing import CliRunner
+
+from fxtrader.cli import app, run_optimize
 from fxtrader.core.types import Tick
 from fxtrader.data.store import TickStore
+
+runner = CliRunner()
 
 
 def _seed(tmp_path):
@@ -53,3 +57,13 @@ def test_run_optimize_invalid_combos_skipped(tmp_path):
     )
     # no valid params -> folds skipped
     assert out["folds"] == []
+
+
+def test_optimize_rejects_unknown_strategy(tmp_path):
+    result = runner.invoke(app, [
+        "optimize", "--strategy", "bogus", "--symbol", "EURUSD",
+        "--start", "2024-01-02", "--end", "2024-01-05",
+        "--data-dir", str(tmp_path),
+    ])
+    assert result.exit_code != 0
+    assert "strategy must be" in result.output.lower() or "bogus" in result.output.lower()
