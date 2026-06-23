@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import polars as pl
 
 from fxtrader.core.types import Bar, Tick
+from fxtrader.data.calendar import iter_months
 from fxtrader.data.store import TickStore
 
 
@@ -27,25 +28,23 @@ class HistoricalTickFeed:
         self._end = end
 
     def __iter__(self) -> Iterator[Tick]:
-        frames = [
-            self._store.read_ticks(sym, self._start, self._end)
-            for sym in self._symbols
-        ]
-        non_empty = [f for f in frames if f.height]
-        if not non_empty:
-            return iter(())
-        merged = pl.concat(non_empty).sort("ts", maintain_order=True)
-        return (
-            Tick(
-                symbol=row["symbol"],
-                ts=row["ts"],
-                bid=row["bid"],
-                ask=row["ask"],
-                bid_volume=row["bid_volume"],
-                ask_volume=row["ask_volume"],
-            )
-            for row in merged.iter_rows(named=True)
-        )
+        for _ym, m_start, m_end in iter_months(self._start, self._end):
+            lo = max(m_start, self._start)
+            hi = min(m_end, self._end)
+            frames = [self._store.read_ticks(sym, lo, hi) for sym in self._symbols]
+            non_empty = [f for f in frames if f.height]
+            if not non_empty:
+                continue
+            merged = pl.concat(non_empty).sort("ts", maintain_order=True)
+            for row in merged.iter_rows(named=True):
+                yield Tick(
+                    symbol=row["symbol"],
+                    ts=row["ts"],
+                    bid=row["bid"],
+                    ask=row["ask"],
+                    bid_volume=row["bid_volume"],
+                    ask_volume=row["ask_volume"],
+                )
 
 
 class Resampler:
