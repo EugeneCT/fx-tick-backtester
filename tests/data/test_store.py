@@ -16,6 +16,10 @@ def _tick(ms_min, bid, ask):
     )
 
 
+def _tick_at(ts, bid):
+    return Tick("EURUSD", ts, bid, bid + 0.0001, 1.0, 1.0)
+
+
 def test_write_then_read_roundtrip(tmp_path):
     store = TickStore(tmp_path)
     store.write_ticks("EURUSD", [_tick(0, 1.1000, 1.1002), _tick(1, 1.1001, 1.1003)])
@@ -73,3 +77,29 @@ def test_read_missing_symbol_returns_empty(tmp_path):
         datetime(2024, 1, 3, tzinfo=timezone.utc),
     )
     assert df.height == 0
+
+
+def test_read_ticks_partition_aware_matches_full_scan(tmp_path):
+    store = TickStore(tmp_path)
+    # write ticks spanning three months
+    a = [
+        _tick_at(datetime(2024, 1, 15, tzinfo=timezone.utc), 1.10),
+        _tick_at(datetime(2024, 2, 15, tzinfo=timezone.utc), 1.11),
+        _tick_at(datetime(2024, 3, 15, tzinfo=timezone.utc), 1.12),
+    ]
+    store.write_ticks("EURUSD", a)
+    # a window covering only Feb should return exactly the Feb tick
+    df = store.read_ticks(
+        "EURUSD",
+        datetime(2024, 2, 1, tzinfo=timezone.utc),
+        datetime(2024, 3, 1, tzinfo=timezone.utc),
+    )
+    assert df.height == 1
+    assert df["bid"].to_list() == [1.11]
+    # a window covering Jan+Feb returns both, sorted
+    df2 = store.read_ticks(
+        "EURUSD",
+        datetime(2024, 1, 1, tzinfo=timezone.utc),
+        datetime(2024, 3, 1, tzinfo=timezone.utc),
+    )
+    assert df2["bid"].to_list() == [1.10, 1.11]
