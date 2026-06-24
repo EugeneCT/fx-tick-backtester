@@ -8,6 +8,7 @@ from fxtrader.strategy.examples.ma_crossover import MaCrossover
 from fxtrader.strategy.examples.mean_reversion_fader import MeanReversionFader
 from fxtrader.strategy.examples.opening_range_breakout import OpeningRangeBreakout
 from fxtrader.strategy.examples.pairs_spread_reversion import PairsSpreadReversion
+from fxtrader.strategy.examples.price_action import PriceActionTrend
 from fxtrader.strategy.examples.trend_filtered_crossover import TrendFilteredCrossover
 from fxtrader.strategy.exits import AtrMultiple, ExitPolicy, FixedPips, NoExit
 
@@ -17,6 +18,8 @@ STRATEGY_PARAMS: dict[str, tuple[str, ...]] = {
     "meanrev": ("lookback", "entry_z", "exit_z", "er_threshold"),
     "orb": ("range_start_hour", "range_end_hour", "entry_end_hour", "exit_hour"),
     "xpair": ("lookback", "entry_z", "exit_z", "stop_z"),
+    "pa": ("pattern", "trend", "wick_ratio", "body_frac",
+           "swing_lookback", "inside_break_bars", "max_hold_bars"),
 }
 
 
@@ -56,5 +59,14 @@ def make_strategy(name: str, *, symbol: str, params: dict,
             primary=symbol, secondary=symbol2, lookback=params["lookback"],
             entry_z=params["entry_z"], exit_z=params["exit_z"], stop_z=params["stop_z"],
             size=params["size"],
+        )
+    if name == "pa":
+        return PriceActionTrend(
+            symbol=symbol, pattern=params["pattern"], trend=params["trend"], size=params["size"],
+            wick_ratio=params.get("wick_ratio", 2.0), body_frac=params.get("body_frac", 0.34),
+            swing_lookback=params.get("swing_lookback", 20),
+            inside_break_bars=params.get("inside_break_bars", 3),
+            max_hold_bars=params.get("max_hold_bars", 0),
+            exit_policy=exit_policy,
         )
     raise ValueError(f"unknown strategy {name!r}")

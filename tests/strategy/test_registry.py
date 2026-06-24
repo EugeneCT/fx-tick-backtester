@@ -4,6 +4,7 @@ from fxtrader.strategy.examples.ma_crossover import MaCrossover
 from fxtrader.strategy.examples.mean_reversion_fader import MeanReversionFader
 from fxtrader.strategy.examples.opening_range_breakout import OpeningRangeBreakout
 from fxtrader.strategy.examples.pairs_spread_reversion import PairsSpreadReversion
+from fxtrader.strategy.examples.price_action import PriceActionTrend
 from fxtrader.strategy.examples.trend_filtered_crossover import TrendFilteredCrossover
 from fxtrader.strategy.exits import AtrMultiple, FixedPips, NoExit
 from fxtrader.strategy.registry import STRATEGY_PARAMS, make_exit_policy, make_strategy
@@ -76,3 +77,21 @@ def test_make_strategy_xpair():
 
 def test_strategy_params_has_xpair():
     assert STRATEGY_PARAMS["xpair"] == ("lookback", "entry_z", "exit_z", "stop_z")
+
+
+def test_make_strategy_pa():
+    s = make_strategy(
+        "pa", symbol="EURUSD",
+        params={"pattern": "pin", "trend": 50, "size": 10_000, "wick_ratio": 2.0,
+                "body_frac": 0.34, "swing_lookback": 20, "inside_break_bars": 3,
+                "max_hold_bars": 0},
+        exit_policy=AtrMultiple(14, 1.5, 2.0),
+    )
+    assert isinstance(s, PriceActionTrend)
+
+
+def test_strategy_params_has_pa():
+    assert STRATEGY_PARAMS["pa"] == (
+        "pattern", "trend", "wick_ratio", "body_frac",
+        "swing_lookback", "inside_break_bars", "max_hold_bars",
+    )
