@@ -144,3 +144,4 @@ class PriceActionTrend(Strategy):
         self._entry_price = None
         self._stop_dist = self._tp_dist = None
         self._hold = 0
+        self._mother = None  # clear any pending inside-bar setup on exit

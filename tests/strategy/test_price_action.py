@@ -103,3 +103,95 @@ def test_ignores_other_symbols():
     s = PriceActionTrend("EURUSD", pattern="pin", trend=4, size=10_000)
     _pf, orders = _drive(s, _UPTREND_PIN, symbol="GBPUSD")
     assert orders == []
+
+
+# ---------------------------------------------------------------------------
+# Pattern-coverage tests: engulf / inside-break / swingbreak
+# ---------------------------------------------------------------------------
+
+def test_engulf_in_uptrend_goes_long():
+    # trend=4; bars 1-4 are rising warmup.
+    # Closes 1-4: 1.0000, 1.0010, 1.0020, 1.0030
+    #
+    # Bar 5 (bearish prev for engulf):
+    #   open=1.0035, close=1.0025  → bearish candle
+    #   deque=[1.0010,1.0020,1.0030,1.0025], MA=1.0021, close=1.0025>MA → trend_dir=+1
+    #   engulfing(bar4,bar5): bar4 is bull, bar5 is bear; need bar5.close<=bar4.open(1.0020)
+    #     → 1.0025>1.0020 → NOT engulfing. No entry.
+    #
+    # Bar 6 (bullish engulf):
+    #   open=1.0020, close=1.0040
+    #   engulfing(bar5,bar6): bar5 bear, bar6 bull;
+    #     bar6.close(1.0040) >= bar5.open(1.0035) ✓
+    #     bar6.open(1.0020) <= bar5.close(1.0025) ✓  → returns +1
+    #   deque=[1.0020,1.0030,1.0025,1.0040], MA=1.0029, close=1.0040>MA → trend_dir=+1
+    #   signal=+1 == trend_dir → LONG
+    series = [
+        (1.0000, 1.0010, 0.9990, 1.0000),  # bar1 warmup
+        (1.0000, 1.0020, 1.0000, 1.0010),  # bar2 warmup
+        (1.0010, 1.0030, 1.0010, 1.0020),  # bar3 warmup
+        (1.0020, 1.0040, 1.0020, 1.0030),  # bar4 warmup
+        (1.0035, 1.0040, 1.0015, 1.0025),  # bar5 bearish prev
+        (1.0020, 1.0045, 1.0018, 1.0040),  # bar6 bullish engulf → long
+    ]
+    s = PriceActionTrend("EURUSD", pattern="engulf", trend=4, size=10_000)
+    pf, orders = _drive(s, series)
+    assert pf.position("EURUSD").quantity > 0
+    assert orders[-1].side == Side.BUY
+
+
+def test_inside_break_in_uptrend_goes_long():
+    # trend=4, inside_break_bars=3
+    # bars 1-3 warmup; bar4 is the mother bar (high=1.0040, low=1.0020).
+    #
+    # At bar4: deque=[1.0000,1.0010,1.0020,1.0030], MA=1.0015, trend_dir=+1.
+    #   _inside_break: _mother=None; is_inside_bar(bar3,bar4): bar4.high=1.0040>bar3.high=1.0030
+    #   → not inside → _mother stays None. No entry.
+    #
+    # Bar 5 (inside bar): high=1.0035<=1.0040, low=1.0022>=1.0020.
+    #   deque=[1.0010,1.0020,1.0030,1.0028], MA=1.0022, close=1.0028>MA → trend_dir=+1.
+    #   _inside_break: _mother=None; is_inside_bar(bar4,bar5) ✓ → _mother=(1.0040,1.0020,3).
+    #   sig=0. No entry.
+    #
+    # Bar 6 (break bar): close=1.0045 > mother.high=1.0040.
+    #   deque=[1.0020,1.0030,1.0028,1.0045], MA=1.0031, close=1.0045>MA → trend_dir=+1.
+    #   _inside_break: _mother set; bar6.close(1.0045)>1.0040 → sig=1, _mother=None. → LONG
+    series = [
+        (1.0000, 1.0010, 0.9990, 1.0000),  # bar1 warmup
+        (1.0000, 1.0020, 1.0000, 1.0010),  # bar2 warmup
+        (1.0010, 1.0030, 1.0010, 1.0020),  # bar3 warmup
+        (1.0020, 1.0040, 1.0020, 1.0030),  # bar4 mother bar
+        (1.0025, 1.0035, 1.0022, 1.0028),  # bar5 inside bar
+        (1.0038, 1.0050, 1.0035, 1.0045),  # bar6 break above mother.high → long
+    ]
+    s = PriceActionTrend("EURUSD", pattern="inside", trend=4, size=10_000, inside_break_bars=3)
+    pf, orders = _drive(s, series)
+    assert pf.position("EURUSD").quantity > 0
+    assert orders[-1].side == Side.BUY
+
+
+def test_swingbreak_in_uptrend_goes_long():
+    # trend=4, swing_lookback=3 → _bars maxlen=max(3+1,2)=4
+    # swing_break fires when len(bars)>=lookback+1=4 AND close > swing_high of prior lookback bars.
+    #
+    # Bars 1-4 warmup (rising):
+    #   At bar4: _bars=[bar1,bar2,bar3,bar4]; window=bars[-4:-1]=[bar1,bar2,bar3]
+    #   swing_high=max(bar1.high=1.0010, bar2.high=1.0020, bar3.high=1.0030)=1.0030
+    #   bar4.close=1.0030 > 1.0030? → False. No entry.
+    #
+    # Bar 5: close=1.0045; _bars=[bar2,bar3,bar4,bar5] (maxlen=4 drops bar1)
+    #   window=bars[-4:-1]=[bar2,bar3,bar4]
+    #   swing_high=max(bar2.high=1.0020, bar3.high=1.0030, bar4.high=1.0040)=1.0040
+    #   bar5.close=1.0045 > 1.0040 ✓ → +1
+    #   deque=[1.0010,1.0020,1.0030,1.0045], MA=1.0026, close=1.0045>MA → trend_dir=+1 → LONG
+    series = [
+        (1.0000, 1.0010, 0.9990, 1.0000),  # bar1 warmup
+        (1.0000, 1.0020, 1.0000, 1.0010),  # bar2 warmup
+        (1.0010, 1.0030, 1.0010, 1.0020),  # bar3 warmup
+        (1.0020, 1.0040, 1.0020, 1.0030),  # bar4 warmup (swing_break checks but no break yet)
+        (1.0030, 1.0050, 1.0030, 1.0045),  # bar5 close > prior swing high 1.0040 → long
+    ]
+    s = PriceActionTrend("EURUSD", pattern="swingbreak", trend=4, size=10_000, swing_lookback=3)
+    pf, orders = _drive(s, series)
+    assert pf.position("EURUSD").quantity > 0
+    assert orders[-1].side == Side.BUY
