@@ -257,6 +257,7 @@ def run_optimize(
     body_frac_values: list[float] | None = None,
     swing_lookback_values: list[int] | None = None,
     inside_break_bars_values: list[int] | None = None,
+    max_hold_bars: int = 0,
 ) -> dict:
     """Walk-forward grid optimization over stored ticks. Returns strict-JSON-safe dict."""
     # Build the signal param grid from the selected strategy's keys.
@@ -311,6 +312,7 @@ def run_optimize(
     }
     if strategy == "pa":
         base_params["pattern"] = pattern
+        base_params["max_hold_bars"] = max_hold_bars
 
     run_fn = _strategy_run_fn(strategy, symbol, data_dir, bar_minutes, base_params, exit_kind, symbol2=symbol2)
     out = walk_forward_optimize(

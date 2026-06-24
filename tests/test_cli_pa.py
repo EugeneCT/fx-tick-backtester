@@ -49,6 +49,20 @@ def test_optimize_pa_grid(tmp_path):
     assert "folds" in out and "mean_oos_objective" in out
 
 
+def test_optimize_pa_accepts_max_hold_bars(tmp_path):
+    _seed_uptrend(tmp_path, days=20)
+    out = run_optimize(
+        symbol="EURUSD",
+        start=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end=datetime(2024, 1, 20, tzinfo=timezone.utc),
+        data_dir=tmp_path, strategy="pa", pattern="pin",
+        trend_values=[5], wick_ratio_values=[2.0], body_frac_values=[0.34],
+        max_hold_bars=3,
+        n_splits=2, bar_minutes=30, objective="sharpe",
+    )
+    assert "folds" in out and "mean_oos_objective" in out
+
+
 def test_run_backtest_pa_end_to_end(tmp_path):
     _seed_uptrend(tmp_path)
     result, metrics = run_backtest(
