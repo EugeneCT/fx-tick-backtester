@@ -6,8 +6,8 @@ from fxtrader.strategy.patterns import pin_bar, engulfing, is_inside_bar, swing_
 T0 = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
 
-def _bar(o, h, l, c):
-    return Bar("EURUSD", T0, o, h, l, c, 1.0)
+def _bar(o, h, lo, c):
+    return Bar("EURUSD", T0, o, h, lo, c, 1.0)
 
 
 # --- pin_bar ---

@@ -25,11 +25,11 @@ def _drive(strategy, ohlc, *, symbol="EURUSD"):
 
     strategy.bind(clock, pf, sink)
     strategy.on_start()
-    for i, (o, h, l, c) in enumerate(ohlc):
+    for i, (o, h, lo, c) in enumerate(ohlc):
         ts = T0 + timedelta(minutes=i)
         clock.set_time(ts)
         _drive.price = c
-        strategy.on_bar(Bar(symbol, ts, o, h, l, c, 1.0))
+        strategy.on_bar(Bar(symbol, ts, o, h, lo, c, 1.0))
     return pf, orders
 
 
