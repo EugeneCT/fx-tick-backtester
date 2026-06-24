@@ -1,8 +1,12 @@
 from datetime import datetime, timezone, timedelta
 
-from fxtrader.cli import run_backtest
+from typer.testing import CliRunner
+
+from fxtrader.cli import app, run_backtest, run_optimize
 from fxtrader.core.types import Tick
 from fxtrader.data.store import TickStore
+
+runner = CliRunner()
 
 
 def _seed_uptrend(tmp_path, days=8):
@@ -16,6 +20,33 @@ def _seed_uptrend(tmp_path, days=8):
         px += 0.00005
         ticks.append(Tick("EURUSD", ts, px, px + 0.00002))
     store.write_ticks("EURUSD", ticks)
+
+
+def test_backtest_pa_cli_runs_end_to_end(tmp_path):
+    _seed_uptrend(tmp_path)
+    res = runner.invoke(app, [
+        "backtest", "--strategy", "pa", "--symbol", "EURUSD",
+        "--start", "2024-01-01", "--end", "2024-01-09",
+        "--pattern", "pin", "--trend", "5", "--bar-minutes", "30",
+        "--exit", "atr", "--atr-period", "5", "--stop-atr", "1.5", "--tp-atr", "2.0",
+        "--max-position", "50000", "--data-dir", str(tmp_path),
+    ])
+    assert res.exit_code == 0, res.output
+    assert "pa" in res.output.lower()
+
+
+def test_optimize_pa_grid(tmp_path):
+    _seed_uptrend(tmp_path, days=20)
+    out = run_optimize(
+        symbol="EURUSD",
+        start=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        end=datetime(2024, 1, 20, tzinfo=timezone.utc),
+        data_dir=tmp_path, strategy="pa", pattern="pin",
+        trend_values=[5], wick_ratio_values=[2.0], body_frac_values=[0.34],
+        n_splits=2, bar_minutes=30, objective="sharpe",
+    )
+    assert out["param_grid"] == {"trend": [5], "wick_ratio": [2.0], "body_frac": [0.34]}
+    assert "folds" in out and "mean_oos_objective" in out
 
 
 def test_run_backtest_pa_end_to_end(tmp_path):
