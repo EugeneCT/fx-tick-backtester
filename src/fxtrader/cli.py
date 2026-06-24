@@ -114,6 +114,12 @@ def run_backtest(
     exit_hour: int = 0,
     symbol2: str | None = None,
     stop_z: float = 0.0,
+    pattern: str = "pin",
+    wick_ratio: float = 2.0,
+    body_frac: float = 0.34,
+    swing_lookback: int = 20,
+    inside_break_bars: int = 3,
+    max_hold_bars: int = 0,
 ):
     """Run a backtest over stored ticks. Returns (BacktestResult, metrics)."""
     store = TickStore(data_dir)
@@ -134,6 +140,9 @@ def run_backtest(
             "range_start_hour": range_start_hour, "range_end_hour": range_end_hour,
             "entry_end_hour": entry_end_hour, "exit_hour": exit_hour,
             "stop_z": stop_z,
+            "pattern": pattern, "wick_ratio": wick_ratio, "body_frac": body_frac,
+            "swing_lookback": swing_lookback, "inside_break_bars": inside_break_bars,
+            "max_hold_bars": max_hold_bars,
         },
         exit_policy=exit_policy,
     )
@@ -184,6 +193,11 @@ def _strategy_run_fn(
         elif strategy_name == "xpair":
             if not (p["lookback"] >= 2 and 0 <= p["exit_z"] < p["entry_z"] < p["stop_z"]):
                 return None
+        elif strategy_name == "pa":
+            if p.get("trend", 0) < 2 or p.get("pattern", "pin") not in (
+                "pin", "engulf", "inside", "swingbreak"
+            ):
+                return None
         _result, metrics = run_backtest(
             symbol=symbol, symbol2=symbol2, start=start, end=end, data_dir=data_dir,
             fast=p.get("fast", 20), slow=p.get("slow", 50), size=p.get("size", 10_000),
@@ -197,6 +211,10 @@ def _strategy_run_fn(
             range_start_hour=p.get("range_start_hour", 0), range_end_hour=p.get("range_end_hour", 0),
             entry_end_hour=p.get("entry_end_hour", 0), exit_hour=p.get("exit_hour", 0),
             stop_z=p.get("stop_z", 0.0),
+            pattern=p.get("pattern", "pin"), wick_ratio=p.get("wick_ratio", 2.0),
+            body_frac=p.get("body_frac", 0.34), swing_lookback=p.get("swing_lookback", 20),
+            inside_break_bars=p.get("inside_break_bars", 3),
+            max_hold_bars=p.get("max_hold_bars", 0),
         )
         return metrics
 
