@@ -68,6 +68,11 @@ same-bar rule), `strategy/indicators.py` (`zscore`, `efficiency_ratio`), `metric
   gross PF a coin-flip even before commission; only 2 of 8 pattern×TF combos cleared both pairs in-sample
   — exactly the ~2 pure noise yields across 8 combos — and neither held across timeframe. Killed at the
   cross-pair screen; frozen OOS left unspent (a real finalist never appeared).
+- **Data-DERIVED shapes** (the only non-hypothesis-first attempt: unsupervised z-norm-window k-means
+  clustering on 4h/8h, `findings-2026-06-25-shape-discovery.md`): letting the data pick the shapes finds
+  nothing either — of 80 well-populated shape-clusters, **0 reach even uncorrected p<0.05 in-sample** and
+  corr(IS mean, OOS mean) ≈ **−0.09**. The IS→OOS shape→return map simply doesn't generalize. Sharpest
+  no-signal evidence yet; intersection of IS-net>0 ∩ OOS-replicate ∩ cross-pair = 0.
 
 The recurring signature: gross profit factor hovers at ~1.0 (coin-flip before costs), commission
 lives just above it. The platform's value is that it produced this **fast, honest, conclusive
