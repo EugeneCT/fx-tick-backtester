@@ -6,8 +6,8 @@ consolidated. The headline research result is a thorough, rigorous NEGATIVE — 
 
 ## TL;DR for a new session
 
-- **Five strategies built, reviewed, merged. ALL net-negative after costs.** Plus a timeframe sweep
-  and a cost-sensitivity probe — every angle exhausted. The edge isn't there; it's a *no-signal*
+- **Six strategies built, reviewed, merged. Five evaluated — ALL net-negative after costs; `pa` is under research (Phase B, 2026-06-24).** Plus a timeframe sweep
+  and a cost-sensitivity probe — every angle exhausted on the first five. The edge isn't there; it's a *no-signal*
   problem, not a cost problem (proven — see Research Conclusion).
 - **Do NOT re-run the exhausted experiments** (single-signal strategies, 30m/60m/120m/240m frequency
   tuning, native-4h re-optimization, cost ladders). They're done and documented. New work should be a
@@ -21,9 +21,9 @@ consolidated. The headline research result is a thorough, rigorous NEGATIVE — 
 - **Python pinned to 3.12 in `.venv`** (system is 3.14, lacks quant wheels). ALWAYS invoke tooling as
   `.venv/bin/python` / `.venv/bin/pytest` / `.venv/bin/fxtrader` — shell `source` does not persist
   across tool calls.
-- Test suite: `.venv/bin/pytest -q` → **221 passed, 2 skipped** (baseline; keep green).
+- Test suite: `.venv/bin/pytest -q` → **249 passed, 2 skipped** (baseline; keep green).
 - CLI: `fxtrader download | backfill | backtest | optimize | live`.
-  - `backtest --strategy {ma,trend,meanrev,orb,xpair} ...` (xpair needs `--symbol2`).
+  - `backtest --strategy {ma,trend,meanrev,orb,xpair,pa} ...` (xpair needs `--symbol2`).
   - `optimize --strategy ... --json <path>` (strict-JSON walk-forward output).
   - `live` is **mode-gated** (DRY_RUN default → PAPER → LIVE behind `--i-understand-live`); needs the
     USER to run IB Gateway + a paper account. Never auto-deploy.
@@ -36,7 +36,7 @@ daily-loss kill switch). Engine is **multi-symbol** (per-symbol `Resampler` dict
 `SimulatedBroker._market`/`Portfolio`). Strategies are bar-based (`on_bar`), single-symbol except
 `xpair` (two legs). Spec: `docs/superpowers/specs/2026-06-15-fx-trader-platform-design.md`.
 
-## The five strategies (`src/fxtrader/strategy/examples/`, wired via `strategy/registry.py`)
+## The six strategies (`src/fxtrader/strategy/examples/`, wired via `strategy/registry.py`)
 
 | name | file | idea | verdict |
 |---|---|---|---|
@@ -45,6 +45,7 @@ daily-loss kill switch). Engine is **multi-symbol** (per-symbol `Resampler` dict
 | `meanrev` | `mean_reversion_fader.py` | z-score fade gated by efficiency-ratio (ranging) | no edge; **stop/TP overlay is a DEAD PATH** (z-exit pre-empts it) |
 | `orb` | `opening_range_breakout.py` | Asian-range breakout at London open + time exit | no edge (closest to break-even gross) |
 | `xpair` | `pairs_spread_reversion.py` | market-neutral fade of z(log EURUSD − log GBPUSD) | no edge |
+| `pa` | `price_action.py` | trend-gated price-action patterns (pin/engulf/inside/swing-break) + MAE-calibrated ATR exit | **under research (Phase B, 2026-06-24)** |
 
 Shared: `strategy/exits.py` (`NoExit`/`FixedPips`/`AtrMultiple` — bar-level stop/TP, stop-first
 same-bar rule), `strategy/indicators.py` (`zscore`, `efficiency_ratio`), `metrics/excursions.py`

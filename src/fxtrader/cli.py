@@ -114,6 +114,12 @@ def run_backtest(
     exit_hour: int = 0,
     symbol2: str | None = None,
     stop_z: float = 0.0,
+    pattern: str = "pin",
+    wick_ratio: float = 2.0,
+    body_frac: float = 0.34,
+    swing_lookback: int = 20,
+    inside_break_bars: int = 3,
+    max_hold_bars: int = 0,
 ):
     """Run a backtest over stored ticks. Returns (BacktestResult, metrics)."""
     store = TickStore(data_dir)
@@ -134,6 +140,9 @@ def run_backtest(
             "range_start_hour": range_start_hour, "range_end_hour": range_end_hour,
             "entry_end_hour": entry_end_hour, "exit_hour": exit_hour,
             "stop_z": stop_z,
+            "pattern": pattern, "wick_ratio": wick_ratio, "body_frac": body_frac,
+            "swing_lookback": swing_lookback, "inside_break_bars": inside_break_bars,
+            "max_hold_bars": max_hold_bars,
         },
         exit_policy=exit_policy,
     )
@@ -184,6 +193,11 @@ def _strategy_run_fn(
         elif strategy_name == "xpair":
             if not (p["lookback"] >= 2 and 0 <= p["exit_z"] < p["entry_z"] < p["stop_z"]):
                 return None
+        elif strategy_name == "pa":
+            if p.get("trend", 0) < 2 or p.get("pattern", "pin") not in (
+                "pin", "engulf", "inside", "swingbreak"
+            ):
+                return None
         _result, metrics = run_backtest(
             symbol=symbol, symbol2=symbol2, start=start, end=end, data_dir=data_dir,
             fast=p.get("fast", 20), slow=p.get("slow", 50), size=p.get("size", 10_000),
@@ -197,6 +211,10 @@ def _strategy_run_fn(
             range_start_hour=p.get("range_start_hour", 0), range_end_hour=p.get("range_end_hour", 0),
             entry_end_hour=p.get("entry_end_hour", 0), exit_hour=p.get("exit_hour", 0),
             stop_z=p.get("stop_z", 0.0),
+            pattern=p.get("pattern", "pin"), wick_ratio=p.get("wick_ratio", 2.0),
+            body_frac=p.get("body_frac", 0.34), swing_lookback=p.get("swing_lookback", 20),
+            inside_break_bars=p.get("inside_break_bars", 3),
+            max_hold_bars=p.get("max_hold_bars", 0),
         )
         return metrics
 
@@ -234,6 +252,12 @@ def run_optimize(
     exit_hour_values: list[int] | None = None,
     symbol2: str | None = None,
     stop_z_values: list[float] | None = None,
+    pattern: str = "pin",
+    wick_ratio_values: list[float] | None = None,
+    body_frac_values: list[float] | None = None,
+    swing_lookback_values: list[int] | None = None,
+    inside_break_bars_values: list[int] | None = None,
+    max_hold_bars: int = 0,
 ) -> dict:
     """Walk-forward grid optimization over stored ticks. Returns strict-JSON-safe dict."""
     # Build the signal param grid from the selected strategy's keys.
@@ -262,6 +286,16 @@ def run_optimize(
             "exit_z": exit_z_values or [],
             "er_threshold": er_threshold_values or [],
         }
+    elif strategy == "pa":
+        grid = {"trend": trend_values or []}
+        if pattern == "pin":
+            grid["wick_ratio"] = wick_ratio_values or []
+            grid["body_frac"] = body_frac_values or []
+        elif pattern == "swingbreak":
+            grid["swing_lookback"] = swing_lookback_values or []
+        elif pattern == "inside":
+            grid["inside_break_bars"] = inside_break_bars_values or []
+        # "engulf": trend-only grid
     else:
         grid = {"fast": fast_values, "slow": slow_values}
         if strategy == "trend":
@@ -276,6 +310,9 @@ def run_optimize(
         "stop_atr": stop_atr,
         "tp_atr": tp_atr,
     }
+    if strategy == "pa":
+        base_params["pattern"] = pattern
+        base_params["max_hold_bars"] = max_hold_bars
 
     run_fn = _strategy_run_fn(strategy, symbol, data_dir, bar_minutes, base_params, exit_kind, symbol2=symbol2)
     out = walk_forward_optimize(
@@ -398,10 +435,16 @@ def backtest(
     tp_atr: float = typer.Option(0.0, help="TP = mult x ATR (exit=atr)"),
     symbol2: str = typer.Option(None, "--symbol2", help="Second leg symbol (xpair)"),
     stop_z: float = typer.Option(4.0, "--stop-z", help="Divergence stop z (xpair)"),
+    pattern: str = typer.Option("pin", "--pattern", help="pin|engulf|inside|swingbreak (pa)"),
+    wick_ratio: float = typer.Option(2.0, "--wick-ratio", help="Pin wick:body ratio (pa pin)"),
+    body_frac: float = typer.Option(0.34, "--body-frac", help="Pin max body/range (pa pin)"),
+    swing_lookback: int = typer.Option(20, "--swing-lookback", help="Swing window bars (pa swingbreak)"),
+    inside_break_bars: int = typer.Option(3, "--inside-break-bars", help="Bars to arm inside-break (pa inside)"),
+    max_hold_bars: int = typer.Option(0, "--max-hold-bars", help="Hard time-exit in bars (0 = off)"),
 ) -> None:
     """Backtest a strategy over stored ticks."""
-    if strategy not in ("ma", "trend", "meanrev", "orb", "xpair"):
-        raise typer.BadParameter("strategy must be ma | trend | meanrev | orb | xpair")
+    if strategy not in ("ma", "trend", "meanrev", "orb", "xpair", "pa"):
+        raise typer.BadParameter("strategy must be ma | trend | meanrev | orb | xpair | pa")
     if strategy == "xpair":
         if not (symbol and symbol2 and start and end):
             raise typer.BadParameter("xpair needs --symbol/--symbol2/--start/--end")
@@ -432,6 +475,26 @@ def backtest(
             max_position=max_position or float("inf"),
         )
         typer.echo(f"symbol={symbol}  bars={bar_minutes}m  orb(range={range_start}-{range_end} entry<{entry_end} exit@{exit_hour})  exit={exit_}")
+        typer.echo(f"  trades        : {metrics['num_trades']}")
+        typer.echo(f"  total return  : {metrics['total_return']:.2%}")
+        typer.echo(f"  Sharpe        : {metrics['sharpe']:.2f}")
+        typer.echo(f"  profit factor : {metrics['profit_factor']:.2f}")
+        return
+    if strategy == "pa":
+        if not (symbol and start and end):
+            raise typer.BadParameter("pa strategy needs --symbol/--start/--end")
+        result, metrics = run_backtest(
+            symbol=symbol, start=_parse_day(start), end=_parse_day(end), data_dir=data_dir,
+            size=size, bar_minutes=bar_minutes, strategy_name="pa",
+            pattern=pattern, trend=trend, wick_ratio=wick_ratio, body_frac=body_frac,
+            swing_lookback=swing_lookback, inside_break_bars=inside_break_bars,
+            max_hold_bars=max_hold_bars,
+            exit_kind=exit_, stop_pips=stop_pips, tp_pips=tp_pips,
+            atr_period=atr_period, stop_atr=stop_atr, tp_atr=tp_atr,
+            daily_loss_limit=daily_loss_limit or float("inf"),
+            max_position=max_position or float("inf"),
+        )
+        typer.echo(f"symbol={symbol}  bars={bar_minutes}m  pa({pattern} trend={trend})  exit={exit_}")
         typer.echo(f"  trades        : {metrics['num_trades']}")
         typer.echo(f"  total return  : {metrics['total_return']:.2%}")
         typer.echo(f"  Sharpe        : {metrics['sharpe']:.2f}")
