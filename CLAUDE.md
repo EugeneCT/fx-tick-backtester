@@ -6,8 +6,8 @@ consolidated. The headline research result is a thorough, rigorous NEGATIVE — 
 
 ## TL;DR for a new session
 
-- **Six strategies built, reviewed, merged. Five evaluated — ALL net-negative after costs; `pa` is under research (Phase B, 2026-06-24).** Plus a timeframe sweep
-  and a cost-sensitivity probe — every angle exhausted on the first five. The edge isn't there; it's a *no-signal*
+- **Six strategies built, reviewed, merged. ALL net-negative after costs.** Plus a timeframe sweep
+  and a cost-sensitivity probe — every angle exhausted. The edge isn't there; it's a *no-signal*
   problem, not a cost problem (proven — see Research Conclusion).
 - **Do NOT re-run the exhausted experiments** (single-signal strategies, 30m/60m/120m/240m frequency
   tuning, native-4h re-optimization, cost ladders). They're done and documented. New work should be a
@@ -45,7 +45,7 @@ daily-loss kill switch). Engine is **multi-symbol** (per-symbol `Resampler` dict
 | `meanrev` | `mean_reversion_fader.py` | z-score fade gated by efficiency-ratio (ranging) | no edge; **stop/TP overlay is a DEAD PATH** (z-exit pre-empts it) |
 | `orb` | `opening_range_breakout.py` | Asian-range breakout at London open + time exit | no edge (closest to break-even gross) |
 | `xpair` | `pairs_spread_reversion.py` | market-neutral fade of z(log EURUSD − log GBPUSD) | no edge |
-| `pa` | `price_action.py` | trend-gated price-action patterns (pin/engulf/inside/swing-break) + MAE-calibrated ATR exit | **under research (Phase B, 2026-06-24)** |
+| `pa` | `price_action.py` | trend-gated price-action patterns (pin/engulf/inside/swing-break) + MAE-calibrated ATR exit | no edge — gross PF ≈ coin-flip, failed cross-pair/cross-TF (Phase B 2026-06-25) |
 
 Shared: `strategy/exits.py` (`NoExit`/`FixedPips`/`AtrMultiple` — bar-level stop/TP, stop-first
 same-bar rule), `strategy/indicators.py` (`zscore`, `efficiency_ratio`), `metrics/excursions.py`
@@ -53,10 +53,10 @@ same-bar rule), `strategy/indicators.py` (`zscore`, `efficiency_ratio`), `metric
 
 ## Research Conclusion (the durable result)
 
-**Simple, retail-accessible price/time/relative-value signals have NO meaningful edge on 30m–4h
-EUR/GBP majors over 2023-06→2026-05.** Established across:
-- **5 structurally-distinct strategies** (trend ×2, mean-reversion, session breakout, cross-pair
-  stat-arb) — all net-negative after costs, all degrade in-sample → out-of-sample.
+**Simple, retail-accessible price/time/relative-value/price-action signals have NO meaningful edge on
+30m–8h EUR/GBP majors over 2023-06→2026-05.** Established across:
+- **6 structurally-distinct strategies** (trend ×2, mean-reversion, session breakout, cross-pair
+  stat-arb, trend-gated price-action) — all net-negative after costs, all degrade in-sample → out-of-sample.
 - **Timeframe sweep** 30/60/120/240m — in-sample positives at coarse bars were single-lucky-fold
   noise that died OOS and failed cross-pair (`findings-2026-06-22-timeframe.md`).
 - **Native 4h re-optimization** (re-tuned params, not reused) — improved numbers but nothing crossed
@@ -64,6 +64,10 @@ EUR/GBP majors over 2023-06→2026-05.** Established across:
 - **Cost-sensitivity probe** (the decisive closer): even at **ZERO cost**, the best configs make
   ~+0.1%/yr (trend) and ~+0.03%/yr (xpair) at Sharpe 0.14–0.23 — noise. **Not a cost problem, a
   no-signal problem.** Cheaper execution / larger size flips the sign but yields no usable strategy.
+- **Trend-gated price-action** (pin/engulfing/inside-bar/swing-break × 4h/8h, `findings-2026-06-25-pa.md`):
+  gross PF a coin-flip even before commission; only 2 of 8 pattern×TF combos cleared both pairs in-sample
+  — exactly the ~2 pure noise yields across 8 combos — and neither held across timeframe. Killed at the
+  cross-pair screen; frozen OOS left unspent (a real finalist never appeared).
 
 The recurring signature: gross profit factor hovers at ~1.0 (coin-flip before costs), commission
 lives just above it. The platform's value is that it produced this **fast, honest, conclusive
@@ -113,9 +117,9 @@ before they could mislead.
 
 - **Consolidation cycle 2:** generalize the accreted CLI param-plumbing — 5 strategies each added
   their own flags / grid-branches / `run_backtest` kwargs; replace with a generic per-strategy param
-  mechanism. Substantial; touches all 5 byte-identical paths → its own brainstorm→spec→plan cycle.
+  mechanism. Substantial; touches all 6 byte-identical paths → its own brainstorm→spec→plan cycle.
 - **Notional / multi-currency Portfolio accounting** (unblocks USDJPY + cross-pairs honestly).
 - **DST-aware ORB session hours** (currently fixed UTC, ~1h seasonal drift).
 - **Rolling-β for xpair** (currently β=1 / synthetic EURGBP).
 - **A genuinely different regime** (more instruments, lower-cost execution, sub-bar microstructure) —
-  a new project, not a sixth single-signal variant.
+  a new project, not yet another single-signal variant.
