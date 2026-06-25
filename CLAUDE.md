@@ -73,6 +73,12 @@ same-bar rule), `strategy/indicators.py` (`zscore`, `efficiency_ratio`), `metric
   nothing either — of 80 well-populated shape-clusters, **0 reach even uncorrected p<0.05 in-sample** and
   corr(IS mean, OOS mean) ≈ **−0.09**. The IS→OOS shape→return map simply doesn't generalize. Sharpest
   no-signal evidence yet; intersection of IS-net>0 ∩ OOS-replicate ∩ cross-pair = 0.
+- **Regime-gating** (tests *timing*, not raw signal: K=3 unsupervised vol×trend-strength regimes,
+  strategies' trades tagged by entry-regime, 30m, `findings-2026-06-26-regime-gating.md`): the "signal
+  isn't dead, it's untimed" hypothesis is REJECTED. Of 15 strategy×regime cells, 0 cleared IS→OOS→cross-pair;
+  the closest (orb×trending: IS PF 1.02 → EURUSD-OOS +118 → **GBPUSD-OOS −311**) is the textbook
+  false-positive the gauntlet rejects. meanrev loses even in its target choppy regime; xpair's 2-leg cost
+  dominates every regime. No cell is net-positive OOS on both pairs (intersection = 0).
 
 The recurring signature: gross profit factor hovers at ~1.0 (coin-flip before costs), commission
 lives just above it. The platform's value is that it produced this **fast, honest, conclusive
