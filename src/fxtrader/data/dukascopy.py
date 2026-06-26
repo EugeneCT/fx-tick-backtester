@@ -20,6 +20,8 @@ POINT_VALUE: dict[str, float] = {
     "EURUSD": 1e-5,
     "GBPUSD": 1e-5,
     "USDJPY": 1e-3,
+    "AUDUSD": 1e-5,
+    "XAUUSD": 1e-3,  # gold: integer 2_600_500 -> 2600.500 (verify vs first live hour)
 }
 
 _RECORD = struct.Struct(">IIIff")

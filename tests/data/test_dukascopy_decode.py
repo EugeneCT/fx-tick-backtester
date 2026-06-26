@@ -44,6 +44,19 @@ def test_point_values_present():
     assert POINT_VALUE["USDJPY"] == 1e-3
 
 
+def test_point_values_new_instruments():
+    assert POINT_VALUE["AUDUSD"] == 1e-5
+    assert POINT_VALUE["XAUUSD"] == 1e-3
+
+
+def test_decode_bi5_xauusd_scaling():
+    # Dukascopy gold integer prices scale by 1e-3: 2_600_500 -> 2600.500
+    hour = datetime(2025, 1, 15, 13, 0, tzinfo=timezone.utc)
+    ticks = decode_bi5(_make_bi5([(0, 2_600_500, 2_600_300, 1.0, 1.0)]), hour, "XAUUSD")
+    assert round(ticks[0].ask, 3) == 2600.500
+    assert round(ticks[0].bid, 3) == 2600.300
+
+
 def test_build_url_uses_zero_indexed_month():
     url = build_url("EURUSD", datetime(2024, 3, 5, 9, tzinfo=timezone.utc))
     # March -> month index 02
