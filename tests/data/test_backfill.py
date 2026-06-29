@@ -131,6 +131,54 @@ def test_backfill_resumes_via_ledger(tmp_path):
     assert calls["n"] == first  # unchanged
 
 
+def test_backfill_retries_failed_hours_across_rounds(tmp_path):
+    # An hour that fails its first fetch but succeeds on a later round must NOT abort
+    # the month; the month completes once every open hour is fetched.
+    calls = {}
+
+    def flaky(url):
+        calls[url] = calls.get(url, 0) + 1
+        if "/11h_" in url and calls[url] == 1:  # the 11:00 hour fails once, then succeeds
+            raise TimeoutError("throttled")
+        return _payload(1)
+
+    store = TickStore(tmp_path)
+    ledger = CoverageLedger(tmp_path / "coverage.json")
+    slept = []
+    start = datetime(2024, 1, 2, 9, tzinfo=timezone.utc)
+    end = datetime(2024, 1, 2, 12, tzinfo=timezone.utc)  # Tue -> 9,10,11 open hours
+
+    summary = backfill(
+        ["EURUSD"], start, end, store,
+        downloader=flaky, retries=0, workers=2,
+        round_backoff=0.0, sleep=slept.append, ledger=ledger,
+    )
+    assert summary["EURUSD"] == 3  # all 3 hours fetched, incl. the retried 11:00
+    assert ledger.is_done("EURUSD", "2024-01")
+    assert len(slept) == 1  # exactly one inter-round backoff
+
+
+def test_backfill_aborts_month_when_hours_never_fetch(tmp_path):
+    # A persistently unfetchable hour must raise (not silently skip) -> no data gaps.
+    def always_fail_11(url):
+        if "/11h_" in url:
+            raise TimeoutError("down")
+        return _payload(1)
+
+    store = TickStore(tmp_path)
+    ledger = CoverageLedger(tmp_path / "coverage.json")
+    with pytest.raises(TimeoutError):
+        backfill(
+            ["EURUSD"],
+            datetime(2024, 1, 2, 9, tzinfo=timezone.utc),
+            datetime(2024, 1, 2, 12, tzinfo=timezone.utc),
+            store, downloader=always_fail_11, retries=0,
+            workers=2, month_rounds=2, round_backoff=0.0, sleep=lambda s: None,
+            ledger=ledger,
+        )
+    assert not ledger.is_done("EURUSD", "2024-01")  # month not marked complete
+
+
 def test_backfill_reports_progress(tmp_path):
     msgs = []
     store = TickStore(tmp_path)
