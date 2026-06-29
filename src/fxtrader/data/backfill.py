@@ -7,7 +7,7 @@ import os
 import random
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -74,6 +74,11 @@ class CoverageLedger:
 Progress = Callable[[str], None]
 
 
+def _fetch_hour(fetch: Downloader, symbol: str, hour: datetime) -> list:
+    """Download + decode a single open hour. Raises OSError on transient network failure."""
+    return decode_bi5(fetch(build_url(symbol, hour)), hour, symbol)
+
+
 def backfill(
     symbols: list[str],
     start: datetime,
@@ -83,12 +88,24 @@ def backfill(
     downloader: Downloader = _http_download,
     workers: int = 8,
     retries: int = 3,
+    month_rounds: int = 4,
+    round_backoff: float = 5.0,
+    sleep: Sleep = time.sleep,
     ledger: "CoverageLedger | None" = None,
     progress: Progress = lambda msg: None,
 ) -> dict[str, int]:
     """Resiliently download [start, end) for each symbol into the store, month by month.
 
     Concurrent per-hour fetches, one write per month, resumable via the ledger.
+
+    Resilience: within a month, hours that still fail after ``retries`` per-request
+    attempts are collected and re-fetched in up to ``month_rounds`` further rounds
+    (Dukascopy intermittently throttles/hangs individual hours under concurrency).
+    A 404 / closed hour decodes to no ticks and is never a failure, so this never
+    introduces silent gaps — the month is only marked done once every open hour was
+    fetched. If hours remain unfetchable after all rounds, the month aborts (raises)
+    so an outer retry loop can resume it later.
+
     Returns {symbol: total_ticks_written_this_run}.
     """
     fetch = resilient_download(downloader, retries=retries, jitter=random.random)
@@ -102,18 +119,45 @@ def backfill(
             lo = max(month_start, start)
             hi = min(month_end, end)
             hours = list(open_hours(lo, hi))
-            ticks = []
+            n_ticks = 0
             if hours:
-                with ThreadPoolExecutor(max_workers=workers) as pool:
-                    for hour_ticks in pool.map(
-                        lambda h: decode_bi5(fetch(build_url(symbol, h)), h, symbol), hours
-                    ):
-                        ticks.extend(hour_ticks)
-                ticks.sort(key=lambda t: t.ts)
-                store.write_ticks(symbol, ticks)
+                # Convert each hour's ticks to a compact Arrow frame as it arrives and
+                # drop the heavy per-tick Python objects immediately — holding a whole
+                # dense month (~6M Tick objects) at once OOMs small boxes. Only the
+                # *failed* hours are tracked for re-fetch in later rounds.
+                frames = []
+                pending = hours
+                for round_i in range(month_rounds + 1):
+                    failed: list[datetime] = []
+                    with ThreadPoolExecutor(max_workers=workers) as pool:
+                        futures = {pool.submit(_fetch_hour, fetch, symbol, h): h for h in pending}
+                        for fut in as_completed(futures):
+                            h = futures[fut]
+                            try:
+                                hour_ticks = fut.result()
+                            except OSError:
+                                failed.append(h)
+                                continue
+                            if hour_ticks:
+                                frames.append(store.frame_from_ticks(hour_ticks))
+                                n_ticks += len(hour_ticks)
+                    if not failed:
+                        break
+                    if round_i == month_rounds:
+                        raise TimeoutError(
+                            f"{symbol} {ym}: {len(failed)} of {len(hours)} hours "
+                            f"unfetchable after {month_rounds + 1} rounds"
+                        )
+                    progress(
+                        f"{symbol} {ym}: {len(failed)} hours failed, "
+                        f"retry round {round_i + 1}/{month_rounds}"
+                    )
+                    sleep(round_backoff)
+                    pending = failed
+                store.write_frames(symbol, frames)
             if ledger is not None:
                 ledger.mark_done(symbol, ym)
-            total += len(ticks)
-            progress(f"{symbol} {ym}: {len(ticks)} ticks from {len(hours)} open hours")
+            total += n_ticks
+            progress(f"{symbol} {ym}: {n_ticks} ticks from {len(hours)} open hours")
         summary[symbol] = total
     return summary
