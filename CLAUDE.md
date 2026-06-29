@@ -79,6 +79,16 @@ same-bar rule), `strategy/indicators.py` (`zscore`, `efficiency_ratio`), `metric
   the closest (orb×trending: IS PF 1.02 → EURUSD-OOS +118 → **GBPUSD-OOS −311**) is the textbook
   false-positive the gauntlet rejects. meanrev loses even in its target choppy regime; xpair's 2-leg cost
   dominates every regime. No cell is net-positive OOS on both pairs (intersection = 0).
+- **New instrument — gold (XAUUSD) + AUDUSD** (the one genuinely-different fork: a less-arbitraged asset
+  class; `pa` at 1h/4h, `findings-2026-06-28-new-instrument-pa.md`): also clean-negative. Gold 4h
+  *looked* alive (engulf/pin/swingbreak IS net PF 1.28-1.30, and OOS even stronger 1.44-1.78) — the
+  project's first IS→OOS replication — but a **pattern-free MA-crossover control reproduces the same
+  gold-yes/AUDUSD-no signature** (gold MA +1.7% OOS, AUD MA −0.65% OOS): it is **trend beta** off gold's
+  +68%/+43% IS/OOS bull run, not price-action. The lone IS finalist (engulf@4h) **collapsed on AUDUSD
+  OOS** (net PF 0.519); intersection of IS-net>0 ∩ OOS-net>0 ∩ both-instruments = **0**. Also note gold
+  IS and OOS are the *same continuous bull market* → not independent confirmations. (This study also
+  forced a real platform fix: the tick `backfill`/`store` path OOM'd + aborted on gold's ~3×-denser
+  ticks; hardened with per-hour round-retry + frame-accumulation + streaming manifest — see git.)
 
 The recurring signature: gross profit factor hovers at ~1.0 (coin-flip before costs), commission
 lives just above it. The platform's value is that it produced this **fast, honest, conclusive
